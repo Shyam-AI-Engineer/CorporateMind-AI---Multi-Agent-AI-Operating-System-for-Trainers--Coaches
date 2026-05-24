@@ -1,0 +1,17 @@
+{
+  "_comment": "Copy to settings.local.json (gitignored) and customize per-developer permissions.",
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(alembic *)",
+      "Bash(docker compose *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "deny": []
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "outputStyle": "Explanatory",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "bash .claude/scripts/block-direct-llm-imports.sh" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "bash .claude/scripts/post-edit-check.sh" }
+        ]
+      }
+    ]
+  }
+}
