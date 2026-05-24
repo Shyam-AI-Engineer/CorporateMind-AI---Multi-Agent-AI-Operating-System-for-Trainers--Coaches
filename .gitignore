@@ -1,0 +1,56 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+venv/
+.env
+*.env
+
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+
+# ── Local secrets / config ────────────────────────────────────────────────────
+.env.local
+.env.*.local
+.env.production
+.env.staging
+doppler.yaml
+secrets/
+
+# ── Claude Code (per-developer settings) ─────────────────────────────────────
+.claude/settings.local.json
+
+# ── Infra / Docker ────────────────────────────────────────────────────────────
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+*.pem
+
+# ── Logs & misc build artifacts ───────────────────────────────────────────────
+*.log
+*.pid
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Documentation — intermediate conversion artifacts (keep the real PDFs) ───
+docs/exports/tmp/
