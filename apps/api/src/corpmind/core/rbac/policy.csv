@@ -1,0 +1,43 @@
+# Casbin RBAC policy for CorporateMind AI
+# Format: p, role, resource, action
+# Built-in roles: OrgAdmin | AgencyManager | Trainer | Reviewer | Analyst | PlatformAdmin
+
+# ── PlatformAdmin (CorporateMind internal only) ───────────────────────────────
+p, PlatformAdmin, *, *
+
+# ── OrgAdmin ──────────────────────────────────────────────────────────────────
+p, OrgAdmin, campaigns, *
+p, OrgAdmin, outreach, *
+p, OrgAdmin, hr_contacts, *
+p, OrgAdmin, analytics, read
+p, OrgAdmin, billing, *
+p, OrgAdmin, workspace, *
+p, OrgAdmin, users, *
+p, OrgAdmin, compliance, read
+
+# ── AgencyManager ─────────────────────────────────────────────────────────────
+p, AgencyManager, campaigns, *
+p, AgencyManager, outreach, *
+p, AgencyManager, hr_contacts, *
+p, AgencyManager, analytics, read
+p, AgencyManager, workspace, read
+
+# ── Trainer ───────────────────────────────────────────────────────────────────
+p, Trainer, campaigns, read
+p, Trainer, campaigns, create
+p, Trainer, outreach, read
+p, Trainer, hr_contacts, read
+p, Trainer, analytics, read
+p, Trainer, proposals, *
+p, Trainer, trainer_profile, *
+
+# ── Reviewer ──────────────────────────────────────────────────────────────────
+p, Reviewer, campaigns, read
+p, Reviewer, outreach, read
+p, Reviewer, analytics, read
+p, Reviewer, hitl_queue, *
+
+# ── Analyst ───────────────────────────────────────────────────────────────────
+p, Analyst, analytics, *
+p, Analyst, campaigns, read
+p, Analyst, outreach, read
