@@ -3,7 +3,6 @@ name = "corpmind-api"
 version = "0.1.0"
 description = "CorporateMind AI — FastAPI backend + Celery workers"
 requires-python = ">=3.12"
-readme = "README.md"
 
 dependencies = [
     # ── Web framework ──────────────────────────────────────────────────────────

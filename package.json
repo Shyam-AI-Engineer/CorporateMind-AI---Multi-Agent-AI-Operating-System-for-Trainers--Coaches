@@ -1,0 +1,16 @@
+{
+  "name": "corpmind-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @corpmind/web dev",
+    "build": "pnpm --filter @corpmind/web build",
+    "lint": "pnpm --filter @corpmind/web lint",
+    "typecheck": "pnpm --filter @corpmind/web typecheck",
+    "test": "pnpm --filter @corpmind/web test"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}
