@@ -23,7 +23,7 @@ This document is an engineer's map of the system wiring. For product context, se
 │ SERVICE PLANE │    │  AGENT RUNTIME    │    │   EVENT BUS        │
 │ trainer_intel │    │  LangGraph        │    │   Redis Streams    │
 │ hr_discovery  │    │  Orchestrator     │    │   Pub/Sub          │
-│ outreach      │    │  + 12 Agents      │    │   DLQ              │
+│ outreach      │    │  + 14 Agents      │    │   DLQ              │
 │ social        │    │  + Tool Registry  │    │   Replay Log       │
 │ whatsapp      │    │  + Memory Manager │    │                    │
 │ proposals     │    │  + Guardrails     │    │                    │
@@ -82,7 +82,8 @@ CorporateMind AI/
 │   │   │   │   ├── proposals/
 │   │   │   │   ├── compliance_guard/
 │   │   │   │   └── ...
-│   │   │   ├── modules/              # 7 Pillars
+│   │   │   ├── modules/              # 12 technical modules (7 Pillars = product framing)
+│   │   │   │   ├── identity/         # Auth, orgs, users, RBAC
 │   │   │   │   ├── trainer_intel/
 │   │   │   │   ├── hr_discovery/
 │   │   │   │   ├── outreach/
@@ -90,7 +91,9 @@ CorporateMind AI/
 │   │   │   │   ├── whatsapp/
 │   │   │   │   ├── proposals/
 │   │   │   │   ├── crm/
+│   │   │   │   ├── campaigns/        # Campaign lifecycle, scheduling, HITL
 │   │   │   │   ├── analytics/
+│   │   │   │   ├── billing/          # Subscriptions, usage metering, invoices
 │   │   │   │   ├── compliance/
 │   │   │   │   └── ...
 │   │   │   ├── channels/             # ChannelAdapter ABC + implementations
@@ -162,7 +165,7 @@ CorporateMind AI/
 │   │   ├── 0001-modular-monolith.md
 │   │   ├── 0002-euri-as-sole-llm-egress.md
 │   │   └── ...
-│   └── exports/                       # CI-generated: OpenAPI, SDKs (gitignored)
+│   └── exports/                       # Committed PDF exports: prd.pdf, architecture.pdf, CLAUDE.pdf
 │       └── README.md
 │
 ├── .claude/
@@ -216,13 +219,13 @@ Every module under `apps/api/src/corpmind/modules/<name>/` follows this pattern:
 | **WhatsApp Engine** | `modules/whatsapp` | Official WA Business Cloud integration | WhatsAppAgent |
 | **Proposals** | `modules/proposals` | AI pitch deck generation | ProposalAgent |
 | **CRM + Analytics** | `modules/crm`, `modules/analytics` | Lead pipeline, campaign metrics | AnalyticsAgent, CampaignOptimizer |
-| **Multi-Agent Runtime** | `agents/` + LangGraph | Orchestrator, tools, state, checkpoints | RootOrchestrator + 11 specialists |
+| **Multi-Agent Runtime** | `agents/` + LangGraph | Orchestrator, tools, state, checkpoints | RootOrchestrator + 13 specialists |
 
 ---
 
 ## 5. Agent Topology
 
-**12 specialized agents** coordinating via shared `AgentState` (TypedDict):
+**14 specialized agents** coordinating via shared `AgentState` (TypedDict):
 
 | Agent | Role | Tools | Model Tier | Memory Class |
 |---|---|---|---|---|

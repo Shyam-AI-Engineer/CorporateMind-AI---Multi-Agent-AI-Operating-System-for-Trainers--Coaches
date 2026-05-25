@@ -239,7 +239,7 @@ CorporateMind AI executes a three-horizon vision:
 
 ### 7.1 In Scope (Phase 1, Months 0–9)
 
-- **12 specialized agents** (full roster in §9)
+- **14 specialized agents** (full roster in §9)
 - **Multi-tenancy:** org → workspace → trainer hierarchy
 - **Modules:** trainer intelligence, HR discovery, outreach AI, social automation, WhatsApp engine, proposals, CRM, campaigns, analytics, billing, compliance
 - **Channel integrations:** Email (Resend/Postmark/SES), WhatsApp Business Cloud API, Telegram Bot, Instagram Graph (publish + insights), Facebook Graph, LinkedIn (public company data + post publishing only — **no personal DM automation**)
@@ -281,7 +281,7 @@ CorporateMind AI executes a three-horizon vision:
 │ SERVICE PLANE │    │  AGENT RUNTIME    │    │   EVENT BUS        │
 │ trainer_intel │    │  LangGraph        │    │   Redis Streams    │
 │ hr_discovery  │    │  Orchestrator     │    │   Pub/Sub          │
-│ outreach      │    │  + 12 Agents      │    │   DLQ              │
+│ outreach      │    │  + 14 Agents      │    │   DLQ              │
 │ social        │    │  + Tool Registry  │    │   Replay Log       │
 │ whatsapp      │    │  + Memory Manager │    │                    │
 │ proposals     │    │  + Guardrails     │    │                    │
