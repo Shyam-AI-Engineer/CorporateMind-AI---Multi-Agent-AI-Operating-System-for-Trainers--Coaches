@@ -4,7 +4,7 @@ LangGraph is the only agent runtime. Agents live under `apps/api/src/corpmind/ag
 
 ## Single responsibility
 - One agent, one job. If you find yourself adding a second concern to an agent, split it.
-- The roster (12 agents) is defined in the PRD §9.1; new agents require an ADR.
+- The roster (14 agents) is defined in the PRD §9.1; new agents require an ADR.
 
 ## Shared state
 - `corpmind.agents.state.AgentState` (TypedDict) is the only state passed between nodes. No untyped graph state.
