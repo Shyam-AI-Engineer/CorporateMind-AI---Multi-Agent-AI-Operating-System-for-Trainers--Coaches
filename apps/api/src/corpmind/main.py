@@ -13,6 +13,7 @@ from corpmind.core.config import settings
 from corpmind.core.database import close_db, init_db
 from corpmind.core.logging_setup import configure_logging
 from corpmind.core.observability import configure_sentry, configure_otel
+from corpmind.core.redis import close_redis, init_redis
 from corpmind.core.tenancy import TenantMiddleware
 
 log = structlog.get_logger(__name__)
@@ -26,10 +27,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_otel()
 
     await init_db()
+    await init_redis()
     log.info("corpmind.startup", env=settings.APP_ENV)
 
     yield
 
+    await close_redis()
     await close_db()
     log.info("corpmind.shutdown")
 

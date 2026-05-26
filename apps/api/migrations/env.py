@@ -27,6 +27,7 @@ from corpmind.modules.proposals.models import Proposal  # noqa: F401
 from corpmind.modules.crm.models import Lead  # noqa: F401
 from corpmind.modules.analytics.models import AnalyticsDaily  # noqa: F401
 from corpmind.modules.billing.models import Subscription, UsageMeter  # noqa: F401
+from corpmind.ai.models import ModelRun  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

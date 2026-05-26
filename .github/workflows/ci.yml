@@ -188,6 +188,55 @@ jobs:
       - name: Run Vitest
         run: pnpm test
 
+  # ── Prompt evals (Promptfoo) ────────────────────────────────────────────────
+  # Runs ONLY when a prompt template or the routing matrix changes.
+  # Requires EURI_API_KEY + EURI_API_BASE_URL as repo secrets to hit the live
+  # gateway. Without them, the job validates structure only (YAML parse + fixture
+  # load) — sufficient as a scaffold until secrets are configured.
+  prompt-evals:
+    name: Prompt evals
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed prompt files
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            prompts:
+              - 'apps/api/src/corpmind/ai/prompts/**'
+              - 'apps/api/src/corpmind/ai/routing.py'
+
+      - name: Set up Node 20
+        if: steps.changes.outputs.prompts == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install promptfoo
+        if: steps.changes.outputs.prompts == 'true'
+        run: npm install -g promptfoo@0.95
+
+      - name: Validate eval configs (structure)
+        if: steps.changes.outputs.prompts == 'true'
+        run: |
+          for cfg in $(find apps/api/src/corpmind/ai/prompts -name evals.yaml); do
+            echo "→ validating $cfg"
+            promptfoo validate -c "$cfg"
+          done
+
+      - name: Run trainer.extraction evals (live, if secrets set)
+        if: steps.changes.outputs.prompts == 'true' && env.EURI_API_KEY != ''
+        working-directory: apps/api/src/corpmind/ai/prompts/trainer/extraction
+        env:
+          EURI_API_KEY: ${{ secrets.EURI_API_KEY }}
+          EURI_API_BASE_URL: ${{ secrets.EURI_API_BASE_URL }}
+        run: promptfoo eval -c evals.yaml --no-progress-bar
+
   # ── Docker build ─────────────────────────────────────────────────────────────
   docker-build:
     name: Docker build (API)

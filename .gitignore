@@ -10,6 +10,7 @@ build/
 venv/
 .env
 *.env
+apps/api/.env
 
 # ── Node / Frontend ───────────────────────────────────────────────────────────
 node_modules/

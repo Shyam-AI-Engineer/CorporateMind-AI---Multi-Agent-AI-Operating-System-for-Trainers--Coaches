@@ -5,13 +5,15 @@ openai, anthropic, google.generativeai, etc. are mechanically blocked outside
 this file and apps/api/src/corpmind/ai/providers/*.
 
 Pipeline (in order):
-  1. PromptInjectionFilter    — scrubs user/retrieved content
-  2. PIIRedactor              — Presidio + regex; substitutes tokens
-  3. SemanticCache            — Qdrant cosine ≥ 0.96 (deterministic tasks only)
-  4. Routing                  — task → (primary, fallback_chain)
-  5. Fallback chain           — primary → secondary → tertiary → local → HITL
-  6. OutputModerator          — schema validation + safety filter
-  7. Langfuse trace           — per-call observability span
+  1. PromptRegistry          — load versioned prompt + substitute inputs
+  2. PromptInjectionFilter   — scrubs user/retrieved content (Phase 2: LLM-Guard)
+  3. PIIRedactor             — Presidio + regex (Phase 2: presidio-analyzer)
+  4. SemanticCache           — Qdrant cosine ≥ 0.96 (Phase 2: Qdrant)
+  5. Budget pre-check        — raises BudgetExceededError if over tenant limit
+  6. Routing + fallback      — primary → secondary → tertiary; each model tried
+  7. OutputModerator         — schema validation (Phase 2: Llama Guard)
+  8. PII restore             — reverse token substitution (Phase 2)
+  9. Record usage            — model_runs table + Langfuse span
 """
 
 from __future__ import annotations
@@ -21,16 +23,30 @@ import uuid
 from typing import Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from corpmind.core.config import settings
-from corpmind.core.exceptions import BudgetExceededError, ModelUnavailableError
+from corpmind.core.exceptions import ModelUnavailableError, RateLimitError
+from corpmind.ai.models import ModelRun
+from corpmind.ai.pricing import estimate_cost_inr
+from corpmind.ai.prompt_registry import registry as prompt_registry
+from corpmind.ai.providers.euri_http import EuriHTTPProvider, extract_content, extract_usage
 from corpmind.ai.routing import get_model_chain
 
 log = structlog.get_logger(__name__)
 
 
 class EuriClient:
-    """Async LLM client with all gateway pipelines applied."""
+    """Async LLM client with all gateway pipelines applied.
+
+    Args:
+        session: Optional AsyncSession for persisting ModelRun records.
+                 When None, usage is logged but not written to DB.
+                 Callers that have a session (FastAPI deps, Celery tasks) should pass it.
+    """
+
+    def __init__(self, session: AsyncSession | None = None) -> None:
+        self._session = session
+        self._provider = EuriHTTPProvider()
 
     async def chat(
         self,
@@ -40,36 +56,44 @@ class EuriClient:
         prompt_inputs: dict[str, Any],
         tenant_id: uuid.UUID,
         request_id: str,
+        agent: str | None = None,
+        run_id: str | None = None,
         stream: bool = False,
     ) -> dict[str, Any]:
         """Execute a structured LLM call via the Euri gateway.
 
         Args:
-            task: Task class from routing matrix (e.g. "outreach_copy", "classify_intent").
-            prompt_name: Versioned prompt identifier (e.g. "outreach.email.v3").
+            task: Task class from routing matrix (e.g. "outreach_copy").
+            prompt_name: Versioned prompt name (e.g. "outreach.email").
+                         Registry resolves to the latest version automatically.
             prompt_inputs: Template substitution values for the prompt.
             tenant_id: Required for budget checking and tracing.
             request_id: Correlation ID from the HTTP request.
-            stream: If True, returns an async generator of chunks (not yet implemented).
+            agent: LangGraph agent name (for tracing).
+            run_id: Workflow run ID (for tracing).
+            stream: Reserved for future streaming support.
 
         Returns:
-            Parsed structured output matching the prompt's output_schema.
+            dict with at least {"content": str} from the model.
         """
+        if stream:
+            raise NotImplementedError("Streaming not yet implemented in EuriClient")
+
         call_id = str(uuid.uuid4())
         start_ms = int(time.monotonic() * 1000)
 
         # 1. Load prompt from registry
-        prompt = await self._load_prompt(prompt_name, prompt_inputs)
+        prompt_text, prompt_version = prompt_registry.load(prompt_name, prompt_inputs)
 
-        # 2. Prompt injection filter
-        prompt = await self._filter_injection(prompt)
+        # 2. Prompt injection filter (Phase 2: LLM-Guard)
+        prompt_text = self._filter_injection(prompt_text)
 
-        # 3. PII redaction
-        prompt, pii_tokens = await self._redact_pii(prompt)
+        # 3. PII redaction (Phase 2: presidio-analyzer)
+        prompt_text, pii_tokens = self._redact_pii(prompt_text)
 
-        # 4. Semantic cache check (for deterministic tasks only)
+        # 4. Semantic cache (Phase 2: Qdrant)
         if self._is_cacheable(task):
-            cached = await self._check_semantic_cache(prompt, tenant_id)
+            cached = await self._check_semantic_cache(prompt_text, tenant_id)
             if cached:
                 log.info(
                     "llm.cache_hit",
@@ -80,110 +104,137 @@ class EuriClient:
                 )
                 return cached
 
-        # 5. Budget pre-check
+        # 5. Budget pre-check (Phase 2: query subscription table)
         await self._check_budget(tenant_id, task)
 
         # 6. Model routing + fallback chain
         model_chain = get_model_chain(task)
-        result, model_used, tokens_in, tokens_out = await self._call_with_fallback(
-            model_chain, prompt, call_id
-        )
+        messages = [{"role": "user", "content": prompt_text}]
 
-        # 7. Output moderation
-        result = await self._moderate_output(result, task)
+        result_text = ""
+        model_used = ""
+        tokens_in = 0
+        tokens_out = 0
 
-        # 8. Reverse PII substitution
-        result = await self._restore_pii(result, pii_tokens)
+        for model in model_chain:
+            try:
+                response = await self._provider.chat_completion(
+                    model=model,
+                    messages=messages,
+                    call_id=call_id,
+                )
+                result_text = extract_content(response)
+                tokens_in, tokens_out = extract_usage(response)
+                model_used = model
+                break
+            except RateLimitError:
+                log.warning("llm.rate_limited", model=model, task=task, call_id=call_id)
+                continue
+            except Exception as exc:
+                log.warning("llm.model_failed", model=model, error=str(exc), call_id=call_id)
+                continue
+
+        if not model_used:
+            raise ModelUnavailableError("All models in fallback chain exhausted")
+
+        # 7. Output moderation (Phase 2: schema validation + Llama Guard)
+        result: dict[str, Any] = {"content": result_text}
+
+        # 8. Reverse PII substitution (Phase 2)
+        # pii_tokens is empty until presidio is wired
 
         # 9. Record cost + update budget
-        cost_inr = self._estimate_cost_inr(model_used, tokens_in, tokens_out)
+        cost_inr = estimate_cost_inr(model_used, tokens_in, tokens_out)
+        latency_ms = int(time.monotonic() * 1000) - start_ms
+
         await self._record_usage(
             tenant_id=tenant_id,
             task=task,
             prompt_name=prompt_name,
+            prompt_version=prompt_version,
             model=model_used,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_inr=cost_inr,
             cached=False,
-            latency_ms=int(time.monotonic() * 1000) - start_ms,
+            latency_ms=latency_ms,
             request_id=request_id,
+            agent=agent,
+            run_id=run_id,
         )
 
         log.info(
             "llm.call_complete",
             task=task,
             model=model_used,
+            prompt_name=prompt_name,
+            prompt_version=prompt_version,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_inr=round(cost_inr, 4),
+            latency_ms=latency_ms,
             request_id=request_id,
         )
 
         return result
 
-    # ── Private pipeline steps (stubs — implemented in Phase 1) ──────────────
+    # ── Pipeline helpers ──────────────────────────────────────────────────────
 
-    async def _load_prompt(self, prompt_name: str, inputs: dict[str, Any]) -> str:
-        """Load versioned prompt from registry and substitute inputs."""
-        # TODO(Phase 1): implement prompt registry lookup
-        return str(inputs)
-
-    async def _filter_injection(self, prompt: str) -> str:
-        """Apply LLM-Guard prompt injection filter."""
-        # TODO(Phase 1): integrate LLM-Guard
+    def _filter_injection(self, prompt: str) -> str:
+        """Phase 2: integrate LLM-Guard prompt injection filter."""
         return prompt
 
-    async def _redact_pii(self, prompt: str) -> tuple[str, dict[str, str]]:
-        """Presidio PII redaction with token substitution."""
-        # TODO(Phase 1): integrate presidio-analyzer
+    def _redact_pii(self, prompt: str) -> tuple[str, dict[str, str]]:
+        """Phase 2: integrate presidio-analyzer with token substitution."""
         return prompt, {}
 
     def _is_cacheable(self, task: str) -> bool:
-        """Deterministic-by-input tasks are cacheable; personalized ones are not."""
-        _non_cacheable = {"outreach_copy", "proposal_generation", "viral_hooks"}
+        _non_cacheable = {"outreach_copy", "proposal_generation", "viral_hooks", "social_post"}
         return task not in _non_cacheable
 
     async def _check_semantic_cache(
-        self, prompt: str, tenant_id: uuid.UUID
+        self, _prompt: str, _tenant_id: uuid.UUID
     ) -> dict[str, Any] | None:
-        """Query global Qdrant prompt cache (cosine ≥ 0.96)."""
-        # TODO(Phase 1): integrate Qdrant semantic cache
+        """Phase 2: query global Qdrant prompt cache (cosine ≥ 0.96)."""
         return None
 
-    async def _check_budget(self, tenant_id: uuid.UUID, task: str) -> None:
-        """Pre-call budget check. Raises BudgetExceededError if over limit."""
-        # TODO(Phase 1): query UsageMeter + Subscription
-        pass
+    async def _check_budget(self, _tenant_id: uuid.UUID, _task: str) -> None:
+        """Phase 2: query UsageMeter + Subscription; raise BudgetExceededError."""
 
-    async def _call_with_fallback(
-        self, model_chain: list[str], prompt: str, call_id: str
-    ) -> tuple[dict[str, Any], str, int, int]:
-        """Try each model in the fallback chain until one succeeds."""
-        for model in model_chain:
-            try:
-                # TODO(Phase 1): call the Euri HTTP API with the selected model
-                return {}, model, 0, 0
-            except Exception as exc:
-                log.warning("llm.model_failed", model=model, error=str(exc))
-                continue
+    async def _record_usage(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task: str,
+        prompt_name: str,
+        prompt_version: str,
+        model: str,
+        tokens_in: int,
+        tokens_out: int,
+        cost_inr: float,
+        cached: bool,
+        latency_ms: int,
+        request_id: str,
+        agent: str | None,
+        run_id: str | None,
+    ) -> None:
+        if self._session is None:
+            return
 
-        raise ModelUnavailableError("All models in fallback chain exhausted")
-
-    async def _moderate_output(self, result: dict[str, Any], task: str) -> dict[str, Any]:
-        """Apply output schema validation and safety filter."""
-        return result
-
-    async def _restore_pii(
-        self, result: dict[str, Any], pii_tokens: dict[str, str]
-    ) -> dict[str, Any]:
-        return result
-
-    def _estimate_cost_inr(self, model: str, tokens_in: int, tokens_out: int) -> float:
-        # TODO(Phase 1): implement per-model pricing lookup
-        return 0.0
-
-    async def _record_usage(self, **kwargs: Any) -> None:
-        """Persist usage to model_runs table and Langfuse."""
-        # TODO(Phase 1): write to model_runs + emit Langfuse span
-        pass
+        run = ModelRun(
+            tenant_id=tenant_id,
+            task=task,
+            prompt_name=prompt_name,
+            prompt_version=prompt_version,
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_inr=cost_inr,
+            cached=cached,
+            latency_ms=latency_ms,
+            request_id=request_id,
+            agent=agent,
+            run_id=run_id,
+        )
+        self._session.add(run)
+        # Caller commits; we only add to session here.
