@@ -21,6 +21,8 @@ class ComplianceCheckRequest(BaseModel):
     content_hash: str
     recipient_count: int = 1
     campaign_id: uuid.UUID | None = None
+    # HMAC(email, org_id) — used for frequency-cap and unsubscribe lookups without storing raw PII
+    recipient_hash: str | None = None
 
 
 class ComplianceCheckResult(BaseModel):

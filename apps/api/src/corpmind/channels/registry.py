@@ -28,9 +28,6 @@ def list_channels() -> list[str]:
 
 def initialize_adapters() -> None:
     """Register all channel adapters. Called during app lifespan startup."""
-    # TODO(Phase 1): import and register concrete adapters
-    # from corpmind.channels.email_smtp import EmailSMTPAdapter
-    # from corpmind.channels.whatsapp_cloud import WhatsAppCloudAdapter
-    # register(EmailSMTPAdapter())
-    # register(WhatsAppCloudAdapter())
-    pass
+    from corpmind.channels.email_smtp import EmailSMTPAdapter
+
+    register(EmailSMTPAdapter())

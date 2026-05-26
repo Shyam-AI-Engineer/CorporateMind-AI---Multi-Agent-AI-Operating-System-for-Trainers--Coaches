@@ -5,12 +5,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GenerateOutreachRequest(BaseModel):
     contact_id: uuid.UUID
-    channel: str
+    channel: str = Field(default="email", pattern=r"^(email|whatsapp|telegram)$")
     campaign_id: uuid.UUID | None = None
     ab_variant: str | None = None
 
@@ -18,11 +18,21 @@ class GenerateOutreachRequest(BaseModel):
 class OutboundMessageOut(BaseModel):
     id: uuid.UUID
     contact_id: uuid.UUID
+    campaign_id: uuid.UUID | None
     channel: str
     subject: str | None
     body: str
+    prompt_version: str | None
+    ab_variant: str | None
     status: str
+    provider_message_id: str | None
     sent_at: datetime | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SendMessageResponse(BaseModel):
+    message_id: uuid.UUID
+    status: str  # queued | blocked
+    compliance_reason: str | None = None

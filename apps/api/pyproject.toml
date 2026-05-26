@@ -59,6 +59,9 @@ dependencies = [
     "python-magic>=0.4",
     "Pillow>=11.0",
     "pypdf>=5.1",
+
+    # ── Email delivery ─────────────────────────────────────────────────────────
+    "aiosmtplib>=3.0",
 ]
 
 [project.optional-dependencies]
