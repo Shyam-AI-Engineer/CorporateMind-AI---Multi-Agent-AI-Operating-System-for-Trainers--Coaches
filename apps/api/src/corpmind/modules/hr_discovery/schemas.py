@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field
 
 
 class HRContactOut(BaseModel):
@@ -35,9 +35,82 @@ class CompanyOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class DiscoveryRequest(BaseModel):
-    """Trigger HR discovery for matching companies."""
-    industries: list[str]
-    employee_count_ranges: list[str] = ["50-500", "500-5000"]
-    cities: list[str] = []
-    max_contacts: int = 100
+# ── Import / enrichment ───────────────────────────────────────────────────────
+
+class ContactImportItem(BaseModel):
+    """One contact to import. Opt-in evidence is mandatory — contacts without
+    it are persisted as non_contactable and excluded from all send segments."""
+    raw_data: str = Field(
+        min_length=10,
+        max_length=5_000,
+        description="Raw text about the contact (scraped bio, vCard, CSV row, etc.)",
+    )
+    source: str = Field(description="URL or system that produced this contact.")
+    source_type: str = Field(
+        pattern="^(webinar_registration|company_website|public_directory|referral|event_badge)$",
+        description="One of the allowed opt-in source types.",
+    )
+    opted_in_at: datetime = Field(description="When the contact gave consent.")
+    opt_in_evidence: str = Field(min_length=5, description="URL, screenshot ref, or consent record ID.")
+    company_name: str = Field(min_length=1, max_length=500)
+    company_industry: str | None = None
+    company_city: str | None = None
+    company_country: str | None = None
+
+
+class ContactBatchImportRequest(BaseModel):
+    contacts: list[ContactImportItem] = Field(min_length=1, max_length=200)
+
+
+class HRContactEnrichment(BaseModel):
+    """Structured extraction the LLM must return for a single contact."""
+    full_name: str | None = None
+    title: str | None = None
+    title_normalized: str | None = None
+    seniority: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    linkedin_url: str | None = None
+    company_name: str | None = None
+    preferred_language: str | None = None
+
+
+class ContactBatchImportResponse(BaseModel):
+    imported: int
+    non_contactable: int
+    failed: int
+    contact_ids: list[uuid.UUID]
+
+
+# ── List / detail ─────────────────────────────────────────────────────────────
+
+class ContactListResponse(BaseModel):
+    contacts: list[HRContactOut]
+    total: int
+    limit: int
+    offset: int
+
+
+# ── Ranking ───────────────────────────────────────────────────────────────────
+
+class RankContactsRequest(BaseModel):
+    """Caller supplies both the contact IDs and the trainer profile snapshot.
+
+    Profile fields come from GET /trainer/profile — passing them here avoids
+    a cross-module repo dependency (CLAUDE.md inter-module rule).
+    """
+    contact_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+    trainer_niche: str
+    trainer_topics: list[str]
+    trainer_target_industries: list[str]
+
+
+class RankedContactOut(BaseModel):
+    contact_id: uuid.UUID
+    score: int = Field(ge=1, le=10)
+    reason: str
+    contact: HRContactOut
+
+
+class RankContactsResponse(BaseModel):
+    ranked: list[RankedContactOut]

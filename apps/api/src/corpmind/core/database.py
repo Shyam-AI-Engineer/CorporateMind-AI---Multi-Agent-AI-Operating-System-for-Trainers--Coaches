@@ -13,7 +13,7 @@ import uuid
 from typing import AsyncGenerator
 
 import structlog
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -72,7 +72,10 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency that yields a tenant-scoped AsyncSession."""
+    """FastAPI dependency that yields a tenant-scoped AsyncSession.
+
+    Requires TenantContext to be set (authenticated routes only).
+    """
     from corpmind.core.tenancy import get_tenant_context
 
     factory = get_session_factory()
@@ -87,16 +90,32 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+async def get_public_session() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency for public (unauthenticated) endpoints.
+
+    Does NOT set RLS — only safe for login, register, and token refresh
+    where no tenant_id is known yet.
+    """
+    factory = get_session_factory()
+    async with factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
 async def set_rls_tenant(session: AsyncSession, tenant_id: uuid.UUID) -> None:
     """Activate Postgres RLS for the current transaction.
 
     Must be called BEFORE any query is issued on the session.
     RLS policy: USING (tenant_id = current_setting('app.tenant_id')::uuid)
+
+    SET LOCAL does not support parameterized queries in PostgreSQL; the UUID
+    is embedded directly. uuid.UUID.__str__ always produces a safe hex string.
     """
-    await session.execute(
-        text("SET LOCAL app.tenant_id = :tid"),
-        {"tid": str(tenant_id)},
-    )
+    await session.execute(text(f"SET LOCAL app.tenant_id = '{tenant_id}'"))
 
 
 # ── Declarative base ───────────────────────────────────────────────────────────

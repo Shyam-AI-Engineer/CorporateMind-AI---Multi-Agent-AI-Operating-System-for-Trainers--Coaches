@@ -1,0 +1,19 @@
+description: Hindi-source content — language detection must NOT default to English.
+vars:
+  content: |
+    राजेश शर्मा एक अनुभवी कॉर्पोरेट ट्रेनर हैं जो पिछले 12 वर्षों से MSME उद्यमियों के लिए
+    बिक्री और टीम प्रबंधन पर कार्यशालाएं आयोजित कर रहे हैं। उनकी विशेषज्ञता विनिर्माण और
+    खुदरा क्षेत्रों में है। एक दिवसीय सत्र ₹40,000 से शुरू होते हैं।
+assert:
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.languages) && o.languages.includes("hi");
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.target_industries) && o.target_industries.length >= 1;
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Number.isInteger(o.pricing_min_inr) && o.pricing_min_inr >= 30000 && o.pricing_min_inr <= 50000;

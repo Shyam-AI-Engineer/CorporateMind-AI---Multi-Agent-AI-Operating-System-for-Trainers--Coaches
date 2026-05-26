@@ -29,3 +29,33 @@ class TrainerProfileRepo:
         self._session.add(profile)
         await self._session.flush()
         return profile
+
+    async def upsert_extraction(
+        self,
+        workspace_id: uuid.UUID,
+        fields: dict,
+        extraction_metadata: dict,
+    ) -> TrainerProfile:
+        """Replace the workspace's profile with a fresh extraction.
+
+        A locked profile is never overwritten — call sites must check `is_locked` first.
+        """
+        existing = await self.find_for_workspace(workspace_id)
+        ctx = get_tenant_context()
+
+        if existing is None:
+            profile = TrainerProfile(
+                tenant_id=ctx.org_id,
+                workspace_id=workspace_id,
+                extraction_metadata=extraction_metadata,
+                **fields,
+            )
+            self._session.add(profile)
+            await self._session.flush()
+            return profile
+
+        for key, value in fields.items():
+            setattr(existing, key, value)
+        existing.extraction_metadata = extraction_metadata
+        await self._session.flush()
+        return existing

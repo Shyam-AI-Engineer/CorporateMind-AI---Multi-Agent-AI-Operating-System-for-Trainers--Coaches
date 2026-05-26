@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from corpmind.core.database import get_session
+from corpmind.core.database import get_public_session, get_session
 from corpmind.modules.identity.schemas import (
     LoginRequest,
     RefreshRequest,
@@ -21,7 +21,7 @@ router = APIRouter()
 @router.post("/register", response_model=TokenResponse, status_code=201)
 async def register(
     req: RegisterRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_public_session),
 ) -> TokenResponse:
     svc = IdentityService(session)
     return await svc.register(req)
@@ -30,7 +30,7 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     req: LoginRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_public_session),
 ) -> TokenResponse:
     svc = IdentityService(session)
     return await svc.login(req)
@@ -39,10 +39,10 @@ async def login(
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     req: RefreshRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_public_session),
 ) -> TokenResponse:
-    # TODO(Phase 1): implement refresh token rotation with Redis jti blocklist
-    raise NotImplementedError("Refresh token endpoint not yet implemented")
+    svc = IdentityService(session)
+    return await svc.refresh(req.refresh_token)
 
 
 @router.get("/me", response_model=UserOut)

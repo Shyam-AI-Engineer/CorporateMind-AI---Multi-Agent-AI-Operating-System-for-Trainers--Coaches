@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     APP_ENV: Literal["development", "staging", "production"] = "development"
     APP_DEBUG: bool = False
     APP_SECRET_KEY: str
-    APP_ALLOWED_HOSTS: list[AnyHttpUrl] = ["http://localhost:3000"]
+    APP_ALLOWED_HOSTS: list[str] = ["http://localhost:3000"]
 
     # ── JWT ───────────────────────────────────────────────────────────────────
     JWT_ALGORITHM: str = "RS256"
@@ -109,6 +109,28 @@ class Settings(BaseSettings):
         if len(v) < 32:
             raise ValueError("APP_SECRET_KEY must be at least 32 characters")
         return v
+
+    @model_validator(mode="after")
+    def ensure_jwt_keys(self) -> "Settings":
+        """Generate ephemeral RS256 keys in dev if not provided in .env."""
+        if self.JWT_PRIVATE_KEY:
+            return self
+        if self.APP_ENV == "production":
+            raise ValueError("JWT_PRIVATE_KEY must be set in production")
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.JWT_PRIVATE_KEY = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+        self.JWT_PUBLIC_KEY = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode()
+        return self
 
     @property
     def is_production(self) -> bool:

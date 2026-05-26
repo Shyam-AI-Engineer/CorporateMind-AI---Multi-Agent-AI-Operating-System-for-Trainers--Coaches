@@ -9,9 +9,11 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.exceptions import AuthenticationError, ConflictError
+from corpmind.core.redis import blocklist_jti, is_jti_blocked
 from corpmind.core.security import (
     create_access_token,
     create_refresh_token,
+    decode_refresh_token,
     generate_jti,
     hash_password,
     verify_password,
@@ -73,6 +75,26 @@ class IdentityService:
             raise AuthenticationError("No active workspace found")
 
         log.info("user.login", user_id=str(user.id))
+        return self._issue_tokens(user, workspace)
+
+    async def refresh(self, raw_refresh_token: str) -> TokenResponse:
+        claims = decode_refresh_token(raw_refresh_token)
+        jti = claims.get("jti", "")
+        if not jti or await is_jti_blocked(jti):
+            raise AuthenticationError("Refresh token has been revoked")
+
+        user_id = uuid.UUID(claims["sub"])
+        user = await self._user_repo.find_by_id(user_id)
+        if not user or not user.is_active:
+            raise AuthenticationError("User not found or deactivated")
+
+        workspace = await self._ws_repo.find_default_for_org(user.org_id)
+        if not workspace:
+            raise AuthenticationError("No active workspace found")
+
+        # Rotate: blocklist the old jti before issuing new tokens
+        await blocklist_jti(jti)
+        log.info("user.token_refreshed", user_id=str(user.id))
         return self._issue_tokens(user, workspace)
 
     def _issue_tokens(self, user: User, workspace: Workspace) -> TokenResponse:

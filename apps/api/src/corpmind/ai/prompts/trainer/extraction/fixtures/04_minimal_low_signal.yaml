@@ -1,0 +1,20 @@
+description: Sparse content — model MUST use nulls/empty lists, not fabricate.
+vars:
+  content: |
+    Hi, I'm a corporate trainer. I run workshops. Please contact me for details.
+assert:
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      // Pricing absent in source → must be null, NEVER hallucinated.
+      return o.pricing_min_inr === null && o.pricing_max_inr === null;
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      // No industries / topics declared → empty array, not a guess.
+      return Array.isArray(o.target_industries) && o.target_industries.length === 0;
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      // Defensive: short bio shouldn't produce > 5 invented topics.
+      return Array.isArray(o.topics) && o.topics.length <= 3;
