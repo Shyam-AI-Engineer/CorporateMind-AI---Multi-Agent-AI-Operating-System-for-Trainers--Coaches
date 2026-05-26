@@ -27,7 +27,7 @@ class Lead(TenantBase):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     meeting_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     booked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

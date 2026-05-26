@@ -24,7 +24,7 @@ class Company(TenantBase):
     city: Mapped[str | None] = mapped_column(String(255), nullable=True)
     country: Mapped[str | None] = mapped_column(String(100), nullable=True)
     source: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -31,7 +31,7 @@ class AuditEvent(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     outcome: Mapped[str] = mapped_column(String(30), nullable=False)  # allowed | blocked
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    event_data: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
