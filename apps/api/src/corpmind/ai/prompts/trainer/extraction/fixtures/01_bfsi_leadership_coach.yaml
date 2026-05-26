@@ -1,0 +1,34 @@
+description: Rich English bio — BFSI leadership coach with clear pricing.
+vars:
+  content: |
+    Priya Menon is a senior leadership coach with 18 years' experience advising
+    CXOs at HDFC Bank, ICICI Securities, and Kotak Mahindra. She specializes in
+    executive presence, behavioural finance, and team-dynamics interventions
+    for mid-market BFSI firms. Engagements typically range from ₹75,000 for a
+    half-day workshop to ₹2,50,000 for a six-week leadership accelerator.
+    Authoritative, no-nonsense delivery style. Works primarily in English, with
+    Hindi available on request.
+assert:
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.niche === "string" && o.niche.toLowerCase().includes("leadership");
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.target_industries) && o.target_industries.some(
+        x => x.toLowerCase().includes("bfsi") || x.toLowerCase().includes("banking") || x.toLowerCase().includes("financial")
+      );
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return o.tone === "authoritative";
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Number.isInteger(o.pricing_min_inr) && Number.isInteger(o.pricing_max_inr)
+        && o.pricing_min_inr < o.pricing_max_inr;
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.languages) && o.languages.includes("en") && o.languages.includes("hi");

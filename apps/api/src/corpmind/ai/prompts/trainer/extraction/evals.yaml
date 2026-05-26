@@ -1,0 +1,112 @@
+# Promptfoo eval suite — trainer.extraction
+#
+# Runs in CI on every PR that touches:
+#   - apps/api/src/corpmind/ai/prompts/trainer/extraction/**
+#   - apps/api/src/corpmind/ai/routing.py
+# Merge gate: ≥ 95% pass rate across all fixtures × providers.
+#
+# Local run:
+#   cd apps/api/src/corpmind/ai/prompts/trainer/extraction
+#   EURI_API_KEY=... EURI_API_BASE_URL=https://api.euri.com/v1 \
+#     npx promptfoo eval -c evals.yaml
+#
+# Why we use the openai provider against Euri: the gateway is OpenAI-compatible,
+# and this keeps the eval honest — it hits the same egress path as prod.
+
+description: |
+  Validates the trainer.extraction prompt produces schema-valid, faithful
+  structured output across English, Hindi, USD-pricing, sparse, and
+  prompt-injection scenarios.
+
+prompts:
+  - id: trainer.extraction
+    file: file://load_prompt.py:load
+    label: trainer.extraction v1
+
+# Exercise both rungs of the routing chain so fallback quality is gated too.
+# Routing matrix: trainer_extraction → [claude-sonnet-4-6, gpt-4o-mini]
+providers:
+  - id: openai:chat:anthropic/claude-sonnet-4-6
+    label: primary
+    config:
+      apiBaseUrl: ${EURI_API_BASE_URL}
+      apiKey: ${EURI_API_KEY}
+      temperature: 0.3
+      max_tokens: 1024
+      response_format:
+        type: json_object
+
+  - id: openai:chat:openai/gpt-4o-mini
+    label: fallback
+    config:
+      apiBaseUrl: ${EURI_API_BASE_URL}
+      apiKey: ${EURI_API_KEY}
+      temperature: 0.3
+      max_tokens: 1024
+      response_format:
+        type: json_object
+
+# Assertions applied to EVERY test, on top of per-fixture assertions.
+defaultTest:
+  assert:
+    # 1. Output must parse as JSON.
+    - type: is-json
+
+    # 2. All required keys present.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        const required = [
+          "niche", "topics", "tone",
+          "pricing_min_inr", "pricing_max_inr",
+          "bio", "usp",
+          "target_industries", "languages"
+        ];
+        return required.every(k => k in o);
+
+    # 3. Types match the schema.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        const stringOrNull = v => v === null || typeof v === "string";
+        const intOrNull    = v => v === null || Number.isInteger(v);
+        const arrOfStrings = v => Array.isArray(v) && v.every(x => typeof x === "string");
+        return stringOrNull(o.niche)
+          && arrOfStrings(o.topics) && o.topics.length <= 12
+          && stringOrNull(o.tone)
+          && intOrNull(o.pricing_min_inr)
+          && intOrNull(o.pricing_max_inr)
+          && stringOrNull(o.bio)
+          && stringOrNull(o.usp)
+          && arrOfStrings(o.target_industries) && o.target_industries.length <= 12
+          && arrOfStrings(o.languages);
+
+    # 4. Tone enum compliance.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        const allowed = ["authoritative", "warm", "playful", "academic", "motivational", null];
+        return allowed.includes(o.tone);
+
+    # 5. Languages use ISO-639-1 lowercase codes.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return o.languages.every(l => /^[a-z]{2}$/.test(l));
+
+tests:
+  - file://fixtures/01_bfsi_leadership_coach.yaml
+  - file://fixtures/02_usd_pricing_conversion.yaml
+  - file://fixtures/03_hindi_brochure.yaml
+  - file://fixtures/04_minimal_low_signal.yaml
+  - file://fixtures/05_injection_attempt.yaml
+
+# Suite-level gate. CI fails the PR if any provider × fixture combination
+# drops below this pass rate across the asserts.
+sharing: false
+outputPath: ./eval-results.json
+
+# To raise the bar later, bump this in lockstep with prompt-engineering.md's
+# "> 2% regression blocks merge" rule.
+defaultThresholds:
+  pass_rate: 0.95

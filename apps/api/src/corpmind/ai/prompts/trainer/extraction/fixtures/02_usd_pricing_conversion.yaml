@@ -1,0 +1,30 @@
+description: USD pricing — model must convert to INR at 83/USD per prompt rules.
+vars:
+  content: |
+    I'm a sales-enablement trainer based in Bengaluru, working with B2B SaaS
+    companies on outbound prospecting, objection handling, and pipeline
+    forecasting. Half-day workshops are $1,200 and two-day intensives are
+    $3,500. I deliver in a warm, conversational style — clients often say it
+    feels more like coaching than training. English only.
+assert:
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      // $1200 * 83 = 99,600 ; $3500 * 83 = 290,500 — allow ±10% drift
+      const minOk = o.pricing_min_inr >= 89000 && o.pricing_min_inr <= 110000;
+      const maxOk = o.pricing_max_inr >= 260000 && o.pricing_max_inr <= 320000;
+      return minOk && maxOk;
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return o.tone === "warm" || o.tone === "playful";
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.target_industries) && o.target_industries.some(
+        x => x.toLowerCase().includes("saas") || x.toLowerCase().includes("b2b") || x.toLowerCase().includes("software")
+      );
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.languages) && o.languages.length === 1 && o.languages[0] === "en";
