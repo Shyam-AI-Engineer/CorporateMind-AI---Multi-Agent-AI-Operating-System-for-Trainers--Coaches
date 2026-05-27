@@ -1,5 +1,6 @@
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import { decodeJwtPayload } from "@/lib/jwt";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -39,13 +40,21 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.accessToken = (user as { accessToken?: string }).accessToken;
-        token.refreshToken = (user as { refreshToken?: string }).refreshToken;
+        token.accessToken = user.accessToken;
+        token.refreshToken = user.refreshToken;
+        // Decode the backend JWT to surface workspace_id and org_id for API calls
+        if (user.accessToken) {
+          const payload = decodeJwtPayload(user.accessToken);
+          token.workspaceId = payload.workspace_id as string | undefined;
+          token.orgId = payload.org_id as string | undefined;
+        }
       }
       return token;
     },
     async session({ session, token }) {
-      (session as { accessToken?: unknown }).accessToken = token.accessToken;
+      session.accessToken = token.accessToken;
+      session.workspaceId = token.workspaceId;
+      session.orgId = token.orgId;
       return session;
     },
   },

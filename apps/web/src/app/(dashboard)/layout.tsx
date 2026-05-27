@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { Sidebar } from "@/components/sidebar";
 
 export default async function DashboardLayout({
   children,
@@ -13,16 +14,9 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex min-h-screen">
-      {/* TODO(Phase 1): Sidebar navigation */}
-      <aside className="w-64 border-r bg-muted/10">
-        <nav className="p-4">
-          <p className="text-sm text-muted-foreground">Navigation — Phase 1</p>
-        </nav>
-      </aside>
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
+    <div className="flex min-h-screen bg-muted/20">
+      <Sidebar userEmail={session.user?.email ?? ""} />
+      <main className="flex-1 overflow-auto">{children}</main>
     </div>
   );
 }

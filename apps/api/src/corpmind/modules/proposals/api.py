@@ -2,7 +2,74 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+import uuid
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from corpmind.core.database import get_session
+from corpmind.modules.crm.service import CRMService
+from corpmind.modules.proposals.schemas import (
+    GenerateProposalRequest,
+    ProposalListOut,
+    ProposalOut,
+    ProposalSendRequest,
+)
+from corpmind.modules.proposals.service import ProposalService
 
 router = APIRouter()
-# TODO(Phase 1): POST /generate, GET /{id}, POST /{id}/send
+
+
+@router.post(
+    "/",
+    response_model=ProposalOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate an AI proposal document for a CRM lead",
+)
+async def generate_proposal(
+    req: GenerateProposalRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ProposalOut:
+    lead = await CRMService(session).get_lead(req.lead_id)
+    return await ProposalService(session).generate(req, lead)
+
+
+@router.get(
+    "/",
+    response_model=ProposalListOut,
+    summary="List proposals for a workspace",
+)
+async def list_proposals(
+    workspace_id: uuid.UUID = Query(...),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> ProposalListOut:
+    return await ProposalService(session).list_proposals(
+        workspace_id, limit=limit, offset=offset
+    )
+
+
+@router.get(
+    "/{proposal_id}",
+    response_model=ProposalOut,
+    summary="Get a proposal by ID",
+)
+async def get_proposal(
+    proposal_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ProposalOut:
+    return await ProposalService(session).get_proposal(proposal_id)
+
+
+@router.post(
+    "/{proposal_id}/send",
+    response_model=ProposalOut,
+    summary="Mark a proposal as sent",
+)
+async def mark_proposal_sent(
+    proposal_id: uuid.UUID,
+    _req: ProposalSendRequest = ProposalSendRequest(),
+    session: AsyncSession = Depends(get_session),
+) -> ProposalOut:
+    return await ProposalService(session).mark_sent(proposal_id)
