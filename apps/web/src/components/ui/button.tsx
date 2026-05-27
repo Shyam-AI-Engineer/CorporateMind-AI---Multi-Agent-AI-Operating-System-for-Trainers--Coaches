@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-type ButtonVariant = "default" | "secondary" | "ghost" | "destructive";
+type ButtonVariant = "default" | "secondary" | "ghost" | "destructive" | "outline";
 type ButtonSize = "default" | "sm" | "lg" | "icon";
 
 const variantClasses: Record<ButtonVariant, string> = {
@@ -8,6 +8,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
   ghost: "hover:bg-accent hover:text-accent-foreground",
   destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+  outline: "border border-input bg-transparent hover:bg-accent hover:text-accent-foreground",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
