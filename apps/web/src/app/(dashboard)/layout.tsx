@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Sidebar } from "@/components/sidebar";
+import { SessionGuard } from "@/components/session-guard";
 
 export default async function DashboardLayout({
   children,
@@ -15,6 +16,9 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-muted/20">
+      {/* SessionGuard is a zero-render client component that watches for
+          refresh token failures and forces a clean logout. */}
+      <SessionGuard />
       <Sidebar userEmail={session.user?.email ?? ""} />
       <main className="flex-1 overflow-auto">{children}</main>
     </div>

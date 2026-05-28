@@ -4,9 +4,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useAddRecipients } from "@/features/campaigns/api/use-campaigns";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { useContacts } from "@/features/hr/api/use-contacts";
+import { ContactMultiSearch } from "@/features/hr/ui/contact-multi-search";
+import type { HRContact } from "@/features/hr/types";
 
 interface AddRecipientsPanelProps {
   campaignId: string;
@@ -17,55 +17,60 @@ export function AddRecipientsPanel({
   campaignId,
   workspaceId,
 }: AddRecipientsPanelProps) {
-  const [raw, setRaw] = useState("");
-  const [parseError, setParseError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<HRContact[]>([]);
+
+  const { data: contactsData, isLoading: contactsLoading } = useContacts();
+  const contacts = contactsData?.items ?? [];
+
   const { mutate, isPending, isSuccess, error, reset } = useAddRecipients(workspaceId);
 
-  function handleAdd() {
-    setParseError(null);
-    const ids = raw
-      .split(/[\s,]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+  function handleAdd(c: HRContact) {
+    setSelected((prev) => [...prev, c]);
+    reset();
+  }
 
-    const invalid = ids.filter((id) => !UUID_RE.test(id));
-    if (invalid.length > 0) {
-      setParseError(`Invalid contact IDs: ${invalid.slice(0, 3).join(", ")}${invalid.length > 3 ? "…" : ""}`);
-      return;
-    }
-    if (ids.length === 0) {
-      setParseError("Paste at least one contact UUID.");
-      return;
-    }
+  function handleRemove(id: string) {
+    setSelected((prev) => prev.filter((c) => c.id !== id));
+  }
 
+  function handleClearAll() {
+    setSelected([]);
+    reset();
+  }
+
+  function handleSubmit() {
+    if (selected.length === 0) return;
     mutate(
-      { campaignId, contactIds: ids },
-      {
-        onSuccess: () => setRaw(""),
-      }
+      { campaignId, contactIds: selected.map((c) => c.id) },
+      { onSuccess: () => setSelected([]) }
     );
   }
+
+  const buttonLabel = isPending
+    ? "Adding…"
+    : selected.length > 0
+    ? `Add ${selected.length} recipient${selected.length === 1 ? "" : "s"}`
+    : "Add recipients";
 
   return (
     <div className="space-y-3 rounded-lg border p-4">
       <Label className="text-sm font-medium">Add recipients</Label>
       <p className="text-xs text-muted-foreground">
-        Paste contact UUIDs separated by commas or newlines.
+        Search and select contacts to include in this campaign.
       </p>
-      <textarea
-        className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs font-mono shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-h-[80px]"
-        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-        value={raw}
-        onChange={(e) => {
-          setRaw(e.target.value);
-          reset();
-          setParseError(null);
-        }}
-      />
 
-      {parseError && (
-        <p className="text-xs text-destructive">{parseError}</p>
+      {contactsLoading ? (
+        <div className="h-9 rounded-md border bg-muted/40 animate-pulse" />
+      ) : (
+        <ContactMultiSearch
+          contacts={contacts}
+          selected={selected}
+          onAdd={handleAdd}
+          onRemove={handleRemove}
+          onClearAll={handleClearAll}
+        />
       )}
+
       {error && (
         <p className="text-xs text-destructive">
           Server error — could not add recipients.
@@ -75,8 +80,12 @@ export function AddRecipientsPanel({
         <p className="text-xs text-green-600">Recipients added successfully.</p>
       )}
 
-      <Button size="sm" onClick={handleAdd} disabled={isPending || !raw.trim()}>
-        {isPending ? "Adding…" : "Add recipients"}
+      <Button
+        size="sm"
+        onClick={handleSubmit}
+        disabled={isPending || selected.length === 0}
+      >
+        {buttonLabel}
       </Button>
     </div>
   );

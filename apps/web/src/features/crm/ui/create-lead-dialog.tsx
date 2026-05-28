@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -16,9 +17,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCreateLead } from "@/features/crm/api/use-leads";
+import { useContacts } from "@/features/hr/api/use-contacts";
+import { ContactSearch } from "@/features/hr/ui/contact-search";
+import type { HRContact } from "@/features/hr/types";
 
 const schema = z.object({
-  contact_id: z.string().uuid("Must be a valid UUID (e.g. 550e8400-…)"),
   score: z.coerce.number().int().min(0).max(100).default(0),
   notes: z.string().optional(),
 });
@@ -33,6 +36,11 @@ interface CreateLeadDialogProps {
 
 export function CreateLeadDialog({ open, onClose, workspaceId }: CreateLeadDialogProps) {
   const createLead = useCreateLead(workspaceId);
+  const [selectedContact, setSelectedContact] = useState<HRContact | null>(null);
+  const [contactRequired, setContactRequired] = useState(false);
+
+  const { data: contactsData, isLoading: contactsLoading } = useContacts();
+  const contacts = contactsData?.items ?? [];
 
   const {
     register,
@@ -42,36 +50,64 @@ export function CreateLeadDialog({ open, onClose, workspaceId }: CreateLeadDialo
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   async function onSubmit(values: FormValues) {
+    if (!selectedContact) {
+      setContactRequired(true);
+      return;
+    }
+    setContactRequired(false);
     await createLead.mutateAsync({
-      contact_id: values.contact_id,
+      contact_id: selectedContact.id,
       workspace_id: workspaceId,
       score: values.score,
       notes: values.notes || undefined,
     });
+    handleReset();
+  }
+
+  function handleReset() {
     reset();
+    setSelectedContact(null);
+    setContactRequired(false);
+  }
+
+  function handleClose() {
+    handleReset();
     onClose();
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add Lead to Pipeline</DialogTitle>
           <DialogDescription>
-            Enter the contact&apos;s ID to create a new lead in the &ldquo;Discovered&rdquo; stage.
+            Search for a contact to create a new lead in the &ldquo;Discovered&rdquo; stage.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="contact_id">Contact ID (UUID)</Label>
-            <Input
-              id="contact_id"
-              placeholder="550e8400-e29b-41d4-a716-446655440000"
-              {...register("contact_id")}
-            />
-            {errors.contact_id && (
-              <p className="text-xs text-destructive">{errors.contact_id.message}</p>
+            <Label>Contact</Label>
+            {contactsLoading ? (
+              <div className="h-9 rounded-md border bg-muted/40 animate-pulse" />
+            ) : (
+              <ContactSearch
+                contacts={contacts}
+                selected={selectedContact}
+                onSelect={(c) => {
+                  setSelectedContact(c);
+                  setContactRequired(false);
+                }}
+                onClear={() => setSelectedContact(null)}
+              />
+            )}
+            {contactRequired && (
+              <p className="text-xs text-destructive">Please select a contact.</p>
+            )}
+            {selectedContact && !selectedContact.is_contactable && (
+              <p className="text-xs text-destructive">
+                This contact is flagged non-contactable.
+              </p>
             )}
           </div>
 
@@ -101,7 +137,7 @@ export function CreateLeadDialog({ open, onClose, workspaceId }: CreateLeadDialo
 
           <DialogFooter>
             <DialogClose asChild>
-              <Button type="button" variant="secondary" onClick={onClose}>
+              <Button type="button" variant="secondary" onClick={handleClose}>
                 Cancel
               </Button>
             </DialogClose>

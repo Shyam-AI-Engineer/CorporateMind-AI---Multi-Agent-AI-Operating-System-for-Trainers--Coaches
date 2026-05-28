@@ -6,6 +6,8 @@ declare module "next-auth" {
     accessToken?: string;
     workspaceId?: string;
     orgId?: string;
+    /** Set to "RefreshAccessTokenError" when silent token refresh fails. */
+    error?: string;
   }
 
   interface User {
@@ -20,5 +22,9 @@ declare module "next-auth/jwt" {
     refreshToken?: string;
     workspaceId?: string;
     orgId?: string;
+    /** Unix timestamp (seconds) when the access token expires, from the JWT `exp` claim. */
+    accessTokenExpiry?: number;
+    /** Set to "RefreshAccessTokenError" when silent token refresh fails. */
+    error?: string;
   }
 }
