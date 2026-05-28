@@ -58,7 +58,7 @@ export function CreateLeadDialog({ open, onClose, workspaceId }: CreateLeadDialo
         <DialogHeader>
           <DialogTitle>Add Lead to Pipeline</DialogTitle>
           <DialogDescription>
-            Enter the contact's ID to create a new lead in the "Discovered" stage.
+            Enter the contact&apos;s ID to create a new lead in the &ldquo;Discovered&rdquo; stage.
           </DialogDescription>
         </DialogHeader>
 

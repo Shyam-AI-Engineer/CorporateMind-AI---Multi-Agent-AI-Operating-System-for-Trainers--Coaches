@@ -12,12 +12,14 @@ import {
   Share2,
   LogOut,
   Zap,
+  UserCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/trainer", label: "Trainer Profile", icon: UserCircle },
   { href: "/crm", label: "CRM Pipeline", icon: TrendingUp },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/hr", label: "HR Contacts", icon: Users },
