@@ -10,6 +10,7 @@ Re-generating creates a new proposal; old ones are preserved.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -115,12 +116,13 @@ class ProposalService:
         limit: int = 50,
         offset: int = 0,
     ) -> ProposalListOut:
-        proposals = await self._repo.list_by_workspace(
-            workspace_id, limit=limit, offset=offset
+        proposals, total = await asyncio.gather(
+            self._repo.list_by_workspace(workspace_id, limit=limit, offset=offset),
+            self._repo.count_by_workspace(workspace_id),
         )
         return ProposalListOut(
             items=[ProposalOut.model_validate(p) for p in proposals],
-            total=len(proposals),
+            total=total,
             limit=limit,
             offset=offset,
         )

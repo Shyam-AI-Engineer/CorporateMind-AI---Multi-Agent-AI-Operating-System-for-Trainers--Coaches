@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCreateCampaign } from "@/features/campaigns/api/use-campaigns";
-import { SUPPORTED_CHANNELS, CHANNEL_CONFIG } from "@/features/campaigns/types";
+import { SUPPORTED_CHANNELS, CHANNEL_CONFIG, LIVE_CHANNELS } from "@/features/campaigns/types";
 
 const schema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
@@ -87,8 +87,9 @@ export function CreateCampaignDialog({
               {...register("channel")}
             >
               {SUPPORTED_CHANNELS.map((ch) => (
-                <option key={ch} value={ch}>
+                <option key={ch} value={ch} disabled={!LIVE_CHANNELS.has(ch)}>
                   {CHANNEL_CONFIG[ch]?.emoji} {CHANNEL_CONFIG[ch]?.label ?? ch}
+                  {!LIVE_CHANNELS.has(ch) ? " (coming soon)" : ""}
                 </option>
               ))}
             </select>

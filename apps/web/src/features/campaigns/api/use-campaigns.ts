@@ -108,6 +108,15 @@ export function useCancelCampaign(workspaceId: string | null | undefined) {
   });
 }
 
+export function useApproveCampaign(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateCampaigns(workspaceId);
+  return useMutation({
+    mutationFn: (campaignId: string) =>
+      api.post<CampaignLaunchResponse>(`/api/v1/campaigns/${campaignId}/approve`, {}),
+    onSuccess: (_, id) => invalidate(id),
+  });
+}
+
 export function useAddRecipients(workspaceId: string | null | undefined) {
   const invalidate = useInvalidateCampaigns(workspaceId);
   return useMutation({

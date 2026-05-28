@@ -73,8 +73,8 @@ export default function CampaignDetailPage() {
         <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-4 text-sm text-yellow-800 dark:border-yellow-700 dark:bg-yellow-950/30 dark:text-yellow-300">
           <p className="font-medium">Manual review required</p>
           <p className="mt-0.5 text-xs">
-            This campaign has more than 200 recipients and requires approval before
-            messages are sent. Please review in the admin panel.
+            This campaign has more than 200 recipients. Review the recipient list
+            below, then click <strong>Approve &amp; Launch</strong> to start sending.
           </p>
         </div>
       )}

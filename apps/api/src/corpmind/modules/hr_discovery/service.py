@@ -9,6 +9,7 @@ Phase 1 operations:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Any
@@ -114,10 +115,13 @@ class HRDiscoveryService:
         offset: int = 0,
     ) -> ContactListResponse:
         filters = ContactFilters(company_id=company_id, limit=limit, offset=offset)
-        contacts = await self._contact_repo.list_contacts(filters)
+        contacts, total = await asyncio.gather(
+            self._contact_repo.list_contacts(filters),
+            self._contact_repo.count_contacts(filters),
+        )
         return ContactListResponse(
             contacts=[HRContactOut.model_validate(c) for c in contacts],
-            total=len(contacts),
+            total=total,
             limit=limit,
             offset=offset,
         )

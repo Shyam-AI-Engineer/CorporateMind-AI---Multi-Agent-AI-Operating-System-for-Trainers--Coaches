@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PostList } from "@/features/social/ui/post-list";
 import { PostComposerDialog } from "@/features/social/ui/post-composer-dialog";
@@ -28,6 +29,17 @@ export default function SocialPage() {
           </p>
         </div>
         <Button onClick={() => setDialogOpen(true)}>Compose post</Button>
+      </div>
+
+      {/* Publishing not yet wired — show a clear alpha notice */}
+      <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <p>
+          <span className="font-medium">Publishing not yet active.</span>{" "}
+          Posts are saved as drafts. Channel adapters for Instagram, Facebook,
+          Telegram, and LinkedIn are coming in the next sprint — scheduled posts
+          will auto-publish once they&apos;re wired.
+        </p>
       </div>
 
       <PostList workspaceId={workspaceId} onCompose={() => setDialogOpen(true)} />

@@ -12,6 +12,7 @@ Re-engagement creates a new lead once the prior one is terminal.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 
@@ -104,12 +105,13 @@ class CRMService:
             raise ValidationError(
                 f"Invalid stage '{stage}'. Valid values: {', '.join(_ALL_STAGES)}"
             )
-        leads = await self._repo.list_pipeline(
-            workspace_id, stage=stage, limit=limit, offset=offset
+        leads, total = await asyncio.gather(
+            self._repo.list_pipeline(workspace_id, stage=stage, limit=limit, offset=offset),
+            self._repo.count_pipeline(workspace_id, stage=stage),
         )
         return LeadListOut(
-            items=[LeadOut.model_validate(l) for l in leads],
-            total=len(leads),
+            items=[LeadOut.model_validate(lead) for lead in leads],
+            total=total,
             limit=limit,
             offset=offset,
         )

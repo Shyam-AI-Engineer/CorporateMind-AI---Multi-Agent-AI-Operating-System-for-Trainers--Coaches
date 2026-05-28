@@ -64,6 +64,13 @@ app.conf.beat_schedule = {
         "schedule": timedelta(minutes=30),
         "options": {"queue": "outreach"},
     },
+
+    # ── Social post publisher (every 15 minutes) ──────────────────────────────
+    "social.publish_scheduled_posts": {
+        "task": "corpmind.workers.tasks.social.publish_scheduled_posts",
+        "schedule": timedelta(minutes=15),
+        "options": {"queue": "social"},
+    },
 }
 
 app.conf.beat_scheduler = "celery.beat:PersistentScheduler"

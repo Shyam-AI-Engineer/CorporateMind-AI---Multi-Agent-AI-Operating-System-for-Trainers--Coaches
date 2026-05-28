@@ -58,6 +58,8 @@ export const STATUS_CONFIG: Record<
   completed:    { label: "Completed",    variant: "secondary"  },
   cancelled:    { label: "Cancelled",    variant: "destructive"},
   pending_hitl: { label: "Pending Review", variant: "warning"  },
+  approved:     { label: "Approved",     variant: "success"    },
+  rejected:     { label: "Rejected",     variant: "destructive"},
 };
 
 export const CHANNEL_CONFIG: Record<string, { label: string; emoji: string }> = {
@@ -68,5 +70,9 @@ export const CHANNEL_CONFIG: Record<string, { label: string; emoji: string }> = 
   facebook:  { label: "Facebook",  emoji: "📘" },
   linkedin:  { label: "LinkedIn",  emoji: "💼" },
 };
+
+// Channels the backend can actually send on today.
+// Others are UI-visible but disabled to prevent silent failures.
+export const LIVE_CHANNELS = new Set(["email"]);
 
 export const SUPPORTED_CHANNELS = Object.keys(CHANNEL_CONFIG);

@@ -58,6 +58,18 @@ class CampaignRepo:
             .values(status=status)
         )
 
+    async def count_for_workspace(self, workspace_id: uuid.UUID) -> int:
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Campaign)
+            .where(
+                Campaign.tenant_id == ctx.org_id,
+                Campaign.workspace_id == workspace_id,
+            )
+        )
+        return result.scalar_one()
+
     async def update_fields(self, campaign_id: uuid.UUID, **values: object) -> None:
         ctx = get_tenant_context()
         await self._session.execute(

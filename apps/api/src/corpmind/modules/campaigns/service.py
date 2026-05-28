@@ -13,10 +13,11 @@ ORM models.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import structlog
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.exceptions import (
@@ -82,12 +83,13 @@ class CampaignService:
         limit: int = 50,
         offset: int = 0,
     ) -> CampaignListOut:
-        campaigns = await self._repo.list_for_workspace(
-            workspace_id, limit=limit, offset=offset
+        campaigns, total = await asyncio.gather(
+            self._repo.list_for_workspace(workspace_id, limit=limit, offset=offset),
+            self._repo.count_for_workspace(workspace_id),
         )
         return CampaignListOut(
             items=[CampaignOut.model_validate(c) for c in campaigns],
-            total=len(campaigns),
+            total=total,
             limit=limit,
             offset=offset,
         )
@@ -228,6 +230,23 @@ class CampaignService:
             hitl_required=False,
         )
 
+    async def approve(self, campaign_id: uuid.UUID) -> CampaignLaunchResponse:
+        """Approve a HITL-gated campaign and immediately launch it.
+
+        Transitions pending_hitl → approved, then re-enters launch() which
+        skips the HITL gate because status == 'approved'.
+        """
+        campaign = await self._require_campaign(campaign_id)
+        if campaign.status != "pending_hitl":
+            raise ConflictError(
+                f"Cannot approve a campaign in status '{campaign.status}'. "
+                "Only campaigns in 'pending_hitl' can be approved."
+            )
+        await self._repo.update_status(campaign_id, "approved")
+        await self._session.commit()
+        log.info("campaign.approved", campaign_id=str(campaign_id))
+        return await self.launch(campaign_id)
+
     async def pause(self, campaign_id: uuid.UUID) -> None:
         campaign = await self._require_campaign(campaign_id)
         if campaign.status not in ("running", "approved"):
@@ -291,23 +310,22 @@ class CampaignService:
         """Verify all contacts exist and are contactable for the current tenant.
 
         Uses raw SQL to avoid importing hr_discovery ORM models (cross-module
-        boundary rule).
+        boundary rule). Uses expanding bindparam for safe parameterized IN.
         """
         ctx = get_tenant_context()
         if not contact_ids:
             return
-        id_list = ", ".join(f"'{cid}'" for cid in contact_ids)
         result = await self._session.execute(
             text(
-                f"SELECT id FROM hr_contacts"  # noqa: S608
-                f" WHERE id IN ({id_list})"
-                f"   AND tenant_id = :tid"
-                f"   AND is_contactable = TRUE"
-            ),
-            {"tid": str(ctx.org_id)},
+                "SELECT id FROM hr_contacts"
+                " WHERE id IN :ids"
+                "   AND tenant_id = :tid"
+                "   AND is_contactable = TRUE"
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": [str(cid) for cid in contact_ids], "tid": str(ctx.org_id)},
         )
-        found_ids = {row[0] for row in result}
-        missing = [cid for cid in contact_ids if str(cid) not in {str(f) for f in found_ids}]
+        found_ids = {str(row[0]) for row in result}
+        missing = [cid for cid in contact_ids if str(cid) not in found_ids]
         if missing:
             raise ValidationError(
                 f"{len(missing)} contact(s) not found or not contactable: "

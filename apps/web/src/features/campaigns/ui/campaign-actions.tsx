@@ -8,6 +8,7 @@ import {
   usePauseCampaign,
   useResumeCampaign,
   useCancelCampaign,
+  useApproveCampaign,
 } from "@/features/campaigns/api/use-campaigns";
 import type { Campaign } from "@/features/campaigns/types";
 
@@ -24,13 +25,15 @@ export function CampaignActions({ campaign, workspaceId }: CampaignActionsProps)
   const pause = usePauseCampaign(workspaceId);
   const resume = useResumeCampaign(workspaceId);
   const cancel = useCancelCampaign(workspaceId);
+  const approve = useApproveCampaign(workspaceId);
 
   const busy =
     lock.isPending ||
     launch.isPending ||
     pause.isPending ||
     resume.isPending ||
-    cancel.isPending;
+    cancel.isPending ||
+    approve.isPending;
 
   const { id, status } = campaign;
 
@@ -78,7 +81,17 @@ export function CampaignActions({ campaign, workspaceId }: CampaignActionsProps)
         </Button>
       )}
 
-      {(status === "draft" || status === "locked" || status === "paused") && (
+      {status === "pending_hitl" && (
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => approve.mutate(id)}
+        >
+          {approve.isPending ? "Approving…" : "Approve & Launch"}
+        </Button>
+      )}
+
+      {(status === "draft" || status === "locked" || status === "paused" || status === "pending_hitl") && (
         <>
           {confirming ? (
             <>

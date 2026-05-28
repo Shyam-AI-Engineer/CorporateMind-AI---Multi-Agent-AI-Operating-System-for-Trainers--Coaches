@@ -47,6 +47,8 @@ from corpmind.modules.outreach.schemas import (
 
 log = structlog.get_logger(__name__)
 
+_SUPPORTED_CHANNELS = frozenset({"email"})
+
 
 class OutreachService:
     def __init__(self, session: AsyncSession) -> None:
@@ -63,6 +65,12 @@ class OutreachService:
         Runs opt-in check before the LLM call to avoid spending AI budget on
         contacts that would be blocked anyway.
         """
+        if req.channel not in _SUPPORTED_CHANNELS:
+            raise ValidationError(
+                f"Channel '{req.channel}' is not yet supported. "
+                f"Available: {', '.join(sorted(_SUPPORTED_CHANNELS))}"
+            )
+
         ctx = get_tenant_context()
 
         contact = await self._fetch_contact(req.contact_id, ctx.org_id)
@@ -75,7 +83,7 @@ class OutreachService:
         if opt_in.outcome == ComplianceOutcome.BLOCKED:
             raise ComplianceBlockError(opt_in.reason or "Opt-in required")
 
-        trainer = await self._fetch_trainer_profile(ctx.workspace_id)
+        trainer = await self._fetch_trainer_profile(ctx.workspace_id, ctx.org_id)
 
         result = await self._llm.chat(
             task="outreach_copy",
@@ -191,17 +199,19 @@ class OutreachService:
         row = result.mappings().one_or_none()
         return dict(row) if row else None
 
-    async def _fetch_trainer_profile(self, workspace_id: uuid.UUID) -> dict:
+    async def _fetch_trainer_profile(
+        self, workspace_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> dict:
         result = await self._session.execute(
             text(
                 "SELECT niche, topics, tone, pricing_min_inr, pricing_max_inr,"
                 "       bio, usp, target_industries"
                 " FROM trainer_profiles"
-                " WHERE workspace_id = :wsid"
+                " WHERE workspace_id = :wsid AND tenant_id = :tid"
                 " ORDER BY locked_at DESC NULLS LAST"
                 " LIMIT 1"
             ),
-            {"wsid": str(workspace_id)},
+            {"wsid": str(workspace_id), "tid": str(tenant_id)},
         )
         row = result.mappings().one_or_none()
         return dict(row) if row else {}

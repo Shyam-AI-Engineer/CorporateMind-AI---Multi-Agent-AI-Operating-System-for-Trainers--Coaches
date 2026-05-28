@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.tenancy import get_tenant_context
@@ -50,6 +50,18 @@ class ProposalRepo:
             .offset(offset)
         )
         return list(result.scalars().all())
+
+    async def count_by_workspace(self, workspace_id: uuid.UUID) -> int:
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Proposal)
+            .where(
+                Proposal.workspace_id == workspace_id,
+                Proposal.tenant_id == ctx.org_id,
+            )
+        )
+        return result.scalar_one()
 
     async def update_fields(self, proposal_id: uuid.UUID, **values: Any) -> None:
         ctx = get_tenant_context()

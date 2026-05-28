@@ -81,6 +81,20 @@ class LeadRepo:
         )
         return {row[0]: row[1] for row in result}
 
+    async def count_pipeline(
+        self, workspace_id: uuid.UUID, *, stage: str | None = None
+    ) -> int:
+        ctx = get_tenant_context()
+        stmt = (
+            select(func.count())
+            .select_from(Lead)
+            .where(Lead.workspace_id == workspace_id, Lead.tenant_id == ctx.org_id)
+        )
+        if stage:
+            stmt = stmt.where(Lead.stage == stage)
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
+
     async def update_fields(self, lead_id: uuid.UUID, **values: object) -> None:
         ctx = get_tenant_context()
         await self._session.execute(

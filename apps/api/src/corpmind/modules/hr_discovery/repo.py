@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,6 +74,22 @@ class HRContactRepo:
             )
         )
         return list(result.scalars().all())
+
+    async def count_contacts(self, filters: ContactFilters) -> int:
+        ctx = get_tenant_context()
+        stmt = (
+            select(func.count())
+            .select_from(HRContact)
+            .where(
+                HRContact.tenant_id == ctx.org_id,
+                HRContact.is_contactable == True,  # noqa: E712
+                HRContact.email_deliverable == True,  # noqa: E712
+            )
+        )
+        if filters.company_id:
+            stmt = stmt.where(HRContact.company_id == filters.company_id)
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
 
     async def list_contacts(self, filters: ContactFilters) -> list[HRContact]:
         ctx = get_tenant_context()

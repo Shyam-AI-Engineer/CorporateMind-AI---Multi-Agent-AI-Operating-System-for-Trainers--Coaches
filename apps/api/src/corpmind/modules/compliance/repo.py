@@ -37,10 +37,9 @@ class UnsubscribeRepo:
             select(UnsubscribeEntry).where(
                 UnsubscribeEntry.tenant_id == tenant_id,
                 UnsubscribeEntry.contact_hash == contact_hash,
-                # Match channel-specific OR global (channel IS NULL) unsubscribe
+                # Fetch all rows; a contact may have channel-specific AND global entries.
             )
         )
-        entry = result.scalar_one_or_none()
-        if not entry:
-            return False
-        return entry.channel is None or entry.channel == channel
+        entries = result.scalars().all()
+        # Blocked if any entry is global (channel IS NULL) or matches the current channel.
+        return any(e.channel is None or e.channel == channel for e in entries)

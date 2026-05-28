@@ -37,18 +37,7 @@ app.config_from_object(
         "task_reject_on_worker_lost": True,
         "worker_prefetch_multiplier": 1,  # prevent queue hoarding
 
-        # Queues — each worker process declares which queues it consumes
-        "task_queues": {
-            "agents":    {"exchange": "agents",    "routing_key": "agents"},
-            "outreach":  {"exchange": "outreach",  "routing_key": "outreach"},
-            "social":    {"exchange": "social",    "routing_key": "social"},
-            "ingestion": {"exchange": "ingestion", "routing_key": "ingestion"},
-            "analytics": {"exchange": "analytics", "routing_key": "analytics"},
-            "scrape":    {"exchange": "scrape",    "routing_key": "scrape"},
-        },
-        "task_default_queue": "agents",
-
-        # Dead-letter queue — exhausted tasks land here
+        # Queues — main queues + dead-letter queues per queue
         "task_queues": {
             **{
                 q: {"exchange": q, "routing_key": q}
@@ -59,6 +48,7 @@ app.config_from_object(
                 for q in ["agents", "outreach", "social", "ingestion", "analytics", "scrape"]
             },
         },
+        "task_default_queue": "agents",
 
         # Time limits (seconds)
         "task_soft_time_limit": 270,  # 90% of hard limit — allows clean checkpoint
@@ -74,7 +64,9 @@ app.config_from_object(
 app.autodiscover_tasks(
     [
         "corpmind.workers.tasks.agents",
+        "corpmind.workers.tasks.campaigns",
         "corpmind.workers.tasks.outreach",
+        "corpmind.workers.tasks.social",
         "corpmind.workers.tasks.analytics",
         "corpmind.workers.tasks.ingestion",
     ]

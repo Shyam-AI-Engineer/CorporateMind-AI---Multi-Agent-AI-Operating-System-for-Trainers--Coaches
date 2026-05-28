@@ -159,3 +159,20 @@ async def launch_campaign(
     required before messages are sent.
     """
     return await CampaignService(session).launch(campaign_id)
+
+
+@router.post(
+    "/{campaign_id}/approve",
+    response_model=CampaignLaunchResponse,
+    summary="Approve a HITL-gated campaign",
+)
+async def approve_campaign(
+    campaign_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> CampaignLaunchResponse:
+    """Approve and immediately launch a campaign that is pending HITL review.
+
+    Transitions pending_hitl → approved → running and enqueues the send
+    pipeline.  Returns the same shape as /launch.
+    """
+    return await CampaignService(session).approve(campaign_id)

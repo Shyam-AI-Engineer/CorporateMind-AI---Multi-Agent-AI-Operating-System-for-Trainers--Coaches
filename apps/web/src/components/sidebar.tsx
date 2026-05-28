@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   TrendingUp,
   Megaphone,
+  Send,
   Users,
   FileText,
   Share2,
@@ -18,13 +19,14 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/trainer", label: "Trainer Profile", icon: UserCircle },
-  { href: "/crm", label: "CRM Pipeline", icon: TrendingUp },
-  { href: "/campaigns", label: "Campaigns", icon: Megaphone },
-  { href: "/hr", label: "HR Contacts", icon: Users },
-  { href: "/proposals", label: "Proposals", icon: FileText },
-  { href: "/social", label: "Social", icon: Share2 },
+  { href: "/dashboard",  label: "Dashboard",      icon: LayoutDashboard },
+  { href: "/trainer",    label: "Trainer Profile", icon: UserCircle },
+  { href: "/crm",        label: "CRM Pipeline",    icon: TrendingUp },
+  { href: "/campaigns",  label: "Campaigns",       icon: Megaphone },
+  { href: "/outreach",   label: "Outreach",        icon: Send },
+  { href: "/hr",         label: "HR Contacts",     icon: Users },
+  { href: "/proposals",  label: "Proposals",       icon: FileText },
+  { href: "/social",     label: "Social",          icon: Share2 },
 ] as const;
 
 interface SidebarProps {
