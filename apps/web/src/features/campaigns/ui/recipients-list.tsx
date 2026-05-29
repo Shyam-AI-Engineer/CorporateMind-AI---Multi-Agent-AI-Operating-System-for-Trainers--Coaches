@@ -14,10 +14,11 @@ const RECIPIENT_STATUS: Record<string, { label: string; variant: BadgeVariant }>
 
 interface RecipientsListProps {
   campaignId: string;
+  campaignStatus?: string;
 }
 
-export function RecipientsList({ campaignId }: RecipientsListProps) {
-  const { data, isLoading, isError } = useCampaignRecipients(campaignId, 50);
+export function RecipientsList({ campaignId, campaignStatus }: RecipientsListProps) {
+  const { data, isLoading, isError } = useCampaignRecipients(campaignId, 50, campaignStatus);
 
   if (isLoading) {
     return (

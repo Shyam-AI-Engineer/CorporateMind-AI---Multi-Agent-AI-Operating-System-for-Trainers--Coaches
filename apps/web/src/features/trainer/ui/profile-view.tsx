@@ -1,8 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { Lock, Pencil, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useLockProfile } from "@/features/trainer/api/use-trainer-profile";
 import type { TrainerProfile } from "@/features/trainer/types";
 
@@ -39,11 +48,11 @@ function ChipList({ items, emptyText }: { items: string[]; emptyText: string }) 
 
 export function ProfileView({ profile, onEdit, onReextract }: ProfileViewProps) {
   const lockMutation = useLockProfile();
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
-  function handleLock() {
-    if (confirm("Lock this profile? Once locked, you cannot edit or re-extract it.")) {
-      lockMutation.mutate();
-    }
+  function handleLockConfirm() {
+    setConfirmOpen(false);
+    lockMutation.mutate();
   }
 
   return (
@@ -78,7 +87,7 @@ export function ProfileView({ profile, onEdit, onReextract }: ProfileViewProps) 
                 size="sm"
                 variant="outline"
                 disabled={lockMutation.isPending}
-                onClick={handleLock}
+                onClick={() => setConfirmOpen(true)}
               >
                 <Lock className="h-3.5 w-3.5" />
                 {lockMutation.isPending ? "Locking…" : "Lock"}
@@ -87,6 +96,30 @@ export function ProfileView({ profile, onEdit, onReextract }: ProfileViewProps) 
           )}
         </div>
       </div>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Lock this profile?</DialogTitle>
+            <DialogDescription>
+              Once locked, the profile cannot be edited or re-extracted. This
+              action is permanent.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleLockConfirm}
+              disabled={lockMutation.isPending}
+            >
+              {lockMutation.isPending ? "Locking…" : "Lock profile"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Core fields */}
       <div className="grid gap-4 sm:grid-cols-2">

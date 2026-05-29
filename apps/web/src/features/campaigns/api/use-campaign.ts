@@ -20,7 +20,8 @@ export function useCampaign(campaignId: string | null | undefined) {
 
 export function useCampaignRecipients(
   campaignId: string | null | undefined,
-  limit = 50
+  limit = 50,
+  campaignStatus?: string
 ) {
   return useQuery({
     queryKey: ["campaigns", "recipients", campaignId, limit],
@@ -30,5 +31,6 @@ export function useCampaignRecipients(
       ),
     enabled: !!campaignId,
     staleTime: 15 * 1000,
+    refetchInterval: campaignStatus === "running" ? 10_000 : false,
   });
 }

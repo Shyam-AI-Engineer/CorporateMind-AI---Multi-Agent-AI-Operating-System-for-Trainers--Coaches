@@ -2,6 +2,7 @@ import { StatsHeader } from "@/features/dashboard/ui/stats-header";
 import { PipelineFunnel } from "@/features/dashboard/ui/pipeline-funnel";
 import { CampaignsSummary } from "@/features/dashboard/ui/campaigns-summary";
 import { InsightsCard } from "@/features/dashboard/ui/insights-card";
+import { OnboardingBanner } from "@/features/dashboard/ui/onboarding-banner";
 
 export default function DashboardPage() {
   return (
@@ -12,6 +13,9 @@ export default function DashboardPage() {
           Your pipeline, campaigns, and AI insights at a glance.
         </p>
       </div>
+
+      {/* Onboarding checklist — hidden once all steps are complete */}
+      <OnboardingBanner />
 
       {/* Top stats row */}
       <StatsHeader />

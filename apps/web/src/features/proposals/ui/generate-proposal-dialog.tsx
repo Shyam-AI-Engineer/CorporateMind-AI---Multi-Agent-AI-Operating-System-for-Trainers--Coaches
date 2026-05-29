@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useGenerateProposal } from "@/features/proposals/api/use-proposals";
+import { ApiError } from "@/lib/api";
 import { usePipelineLeads } from "@/features/crm/api/use-leads";
 import { STAGE_CONFIG } from "@/features/crm/types";
 
@@ -95,7 +96,7 @@ export function GenerateProposalDialog({
 
           {error && (
             <p className="text-xs text-destructive">
-              Failed to generate proposal. Please try again.
+              {error instanceof ApiError ? error.message : "Failed to generate proposal — please try again."}
             </p>
           )}
 

@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useImportContacts } from "@/features/hr/api/use-contacts";
+import { ApiError } from "@/lib/api";
 import { SOURCE_TYPES, SOURCE_TYPE_LABELS } from "@/features/hr/types";
 
 const schema = z.object({
@@ -184,7 +185,7 @@ export function ImportContactDialog({ open, onOpenChange }: ImportContactDialogP
 
           {error && (
             <p className="text-xs text-destructive">
-              Import failed — please check your inputs and try again.
+              {error instanceof ApiError ? error.message : "Import failed — please try again."}
             </p>
           )}
           {isSuccess && (

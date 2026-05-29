@@ -6,6 +6,7 @@ import type { Lead, LeadCreate, LeadListOut, StageAdvanceResponse } from "@/feat
 import { PIPELINE_STAGES } from "@/features/crm/types";
 
 const LEADS_KEY = (workspaceId: string) => ["crm", "leads", workspaceId] as const;
+const STATS_KEY = (workspaceId: string) => ["crm", "stats", workspaceId] as const;
 
 export function usePipelineLeads(workspaceId: string | null | undefined) {
   const query = useQuery({
@@ -35,6 +36,7 @@ export function useAdvanceStage(workspaceId: string | null | undefined) {
     onSuccess: () => {
       if (workspaceId) {
         void queryClient.invalidateQueries({ queryKey: LEADS_KEY(workspaceId) });
+        void queryClient.invalidateQueries({ queryKey: STATS_KEY(workspaceId) });
       }
     },
   });
@@ -48,6 +50,7 @@ export function useMarkLost(workspaceId: string | null | undefined) {
     onSuccess: () => {
       if (workspaceId) {
         void queryClient.invalidateQueries({ queryKey: LEADS_KEY(workspaceId) });
+        void queryClient.invalidateQueries({ queryKey: STATS_KEY(workspaceId) });
       }
     },
   });
@@ -60,6 +63,7 @@ export function useCreateLead(workspaceId: string | null | undefined) {
     onSuccess: () => {
       if (workspaceId) {
         void queryClient.invalidateQueries({ queryKey: LEADS_KEY(workspaceId) });
+        void queryClient.invalidateQueries({ queryKey: STATS_KEY(workspaceId) });
       }
     },
   });

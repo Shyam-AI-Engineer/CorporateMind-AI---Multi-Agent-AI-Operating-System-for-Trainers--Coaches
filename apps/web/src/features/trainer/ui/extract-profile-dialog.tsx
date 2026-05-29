@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useExtractProfile } from "@/features/trainer/api/use-trainer-profile";
+import { ApiError } from "@/lib/api";
 
 const MIN_CHARS = 20;
 const MAX_CHARS = 20_000;
@@ -103,7 +104,7 @@ export function ExtractProfileDialog({
 
           {error && (
             <p className="text-xs text-destructive">
-              Extraction failed. Please try again or refine the input.
+              {error instanceof ApiError ? error.message : "Extraction failed — please try again."}
             </p>
           )}
 

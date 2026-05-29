@@ -108,7 +108,7 @@ export default function CampaignDetailPage() {
       {/* Recipients table */}
       <div className="space-y-3">
         <h2 className="text-sm font-semibold">Recipients</h2>
-        <RecipientsList campaignId={id} />
+        <RecipientsList campaignId={id} campaignStatus={campaign.status} />
       </div>
     </div>
   );

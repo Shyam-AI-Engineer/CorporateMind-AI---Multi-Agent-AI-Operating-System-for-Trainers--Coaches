@@ -119,6 +119,7 @@ export function useApproveCampaign(workspaceId: string | null | undefined) {
 
 export function useAddRecipients(workspaceId: string | null | undefined) {
   const invalidate = useInvalidateCampaigns(workspaceId);
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
       campaignId,
@@ -131,6 +132,10 @@ export function useAddRecipients(workspaceId: string | null | undefined) {
         `/api/v1/campaigns/${campaignId}/recipients`,
         { contact_ids: contactIds }
       ),
-    onSuccess: (_, { campaignId }) => invalidate(campaignId),
+    onSuccess: (_, { campaignId }) => {
+      invalidate(campaignId);
+      // Invalidate recipients list — prefix match covers all limit variants
+      void qc.invalidateQueries({ queryKey: ["campaigns", "recipients", campaignId] });
+    },
   });
 }
