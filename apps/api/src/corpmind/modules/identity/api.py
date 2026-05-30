@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.database import get_public_session, get_session
+from corpmind.modules.billing.service import BillingService
 from corpmind.modules.identity.schemas import (
     LoginRequest,
     RefreshRequest,
@@ -23,7 +24,7 @@ async def register(
     req: RegisterRequest,
     session: AsyncSession = Depends(get_public_session),
 ) -> TokenResponse:
-    svc = IdentityService(session)
+    svc = IdentityService(session, billing_service=BillingService(session))
     return await svc.register(req)
 
 

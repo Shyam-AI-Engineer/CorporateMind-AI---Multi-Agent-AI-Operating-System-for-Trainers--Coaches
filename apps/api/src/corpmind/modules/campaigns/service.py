@@ -185,6 +185,8 @@ class CampaignService:
                 "Lock the campaign first."
             )
 
+        await self._require_locked_profile(ctx.workspace_id, ctx.org_id)
+
         count = campaign.recipient_count
         if count == 0:
             raise ValidationError("Campaign has no recipients.")
@@ -305,6 +307,30 @@ class CampaignService:
         if not campaign:
             raise NotFoundError(f"Campaign {campaign_id} not found")
         return campaign
+
+    async def _require_locked_profile(
+        self, workspace_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> None:
+        """Ensure the workspace has a locked trainer profile before campaign launch.
+
+        Uses raw SQL to avoid importing trainer_intel ORM models (cross-module
+        boundary rule — same pattern as _validate_contacts).
+        """
+        result = await self._session.execute(
+            text(
+                "SELECT 1 FROM trainer_profiles"
+                " WHERE workspace_id = :wid"
+                "   AND tenant_id = :tid"
+                "   AND is_locked = TRUE"
+                " LIMIT 1"
+            ),
+            {"wid": str(workspace_id), "tid": str(tenant_id)},
+        )
+        if result.fetchone() is None:
+            raise ValidationError(
+                "A locked trainer profile is required before launching a campaign. "
+                "Complete and lock your trainer profile in the Trainer section first."
+            )
 
     async def _validate_contacts(self, contact_ids: list[uuid.UUID]) -> None:
         """Verify all contacts exist and are contactable for the current tenant.

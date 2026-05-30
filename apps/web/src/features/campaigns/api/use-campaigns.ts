@@ -49,7 +49,11 @@ export function useCampaignList(workspaceId: string | null | undefined) {
 function useInvalidateCampaigns(workspaceId: string | null | undefined) {
   const qc = useQueryClient();
   return (campaignId?: string) => {
-    if (workspaceId) void qc.invalidateQueries({ queryKey: LIST_KEY(workspaceId) });
+    if (workspaceId) {
+      void qc.invalidateQueries({ queryKey: LIST_KEY(workspaceId) });
+      // useCampaigns (used by OnboardingBanner) uses ["campaigns", workspaceId, ...]
+      void qc.invalidateQueries({ queryKey: ["campaigns", workspaceId] });
+    }
     if (campaignId) void qc.invalidateQueries({ queryKey: DETAIL_KEY(campaignId) });
   };
 }

@@ -13,6 +13,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useLockProfile } from "@/features/trainer/api/use-trainer-profile";
+import { ApiError } from "@/lib/api";
 import type { TrainerProfile } from "@/features/trainer/types";
 
 interface ProfileViewProps {
@@ -50,6 +51,12 @@ export function ProfileView({ profile, onEdit, onReextract }: ProfileViewProps) 
   const lockMutation = useLockProfile();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  const missingLockFields = [
+    !profile.niche && "niche",
+    !profile.bio && "bio",
+    !profile.topics.length && "topics",
+  ].filter(Boolean) as string[];
+
   function handleLockConfirm() {
     setConfirmOpen(false);
     lockMutation.mutate();
@@ -58,43 +65,58 @@ export function ProfileView({ profile, onEdit, onReextract }: ProfileViewProps) 
   return (
     <div className="space-y-6">
       {/* Top metadata row */}
-      <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4">
-        <div className="space-y-0.5">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            Niche
-          </p>
-          <p className="text-lg font-semibold">
-            {profile.niche ?? <span className="text-muted-foreground">Not set</span>}
-          </p>
+      <div className="rounded-lg border p-4 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-0.5">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              Niche
+            </p>
+            <p className="text-lg font-semibold">
+              {profile.niche ?? <span className="text-muted-foreground">Not set</span>}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {profile.is_locked ? (
+              <Badge variant="warning" className="gap-1">
+                <Lock className="h-3 w-3" />
+                Locked
+              </Badge>
+            ) : (
+              <>
+                <Button size="sm" variant="outline" onClick={onEdit}>
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
+                <Button size="sm" variant="outline" onClick={onReextract}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Re-extract
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={lockMutation.isPending}
+                  onClick={() => setConfirmOpen(true)}
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  {lockMutation.isPending ? "Locking…" : "Lock"}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {profile.is_locked ? (
-            <Badge variant="warning" className="gap-1">
-              <Lock className="h-3 w-3" />
-              Locked
-            </Badge>
-          ) : (
-            <>
-              <Button size="sm" variant="outline" onClick={onEdit}>
-                <Pencil className="h-3.5 w-3.5" />
-                Edit
-              </Button>
-              <Button size="sm" variant="outline" onClick={onReextract}>
-                <RefreshCw className="h-3.5 w-3.5" />
-                Re-extract
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={lockMutation.isPending}
-                onClick={() => setConfirmOpen(true)}
-              >
-                <Lock className="h-3.5 w-3.5" />
-                {lockMutation.isPending ? "Locking…" : "Lock"}
-              </Button>
-            </>
-          )}
-        </div>
+        {!profile.is_locked && missingLockFields.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            To lock, add:{" "}
+            <span className="font-medium">{missingLockFields.join(", ")}</span>
+          </p>
+        )}
+        {lockMutation.error && (
+          <p className="text-xs text-destructive">
+            {lockMutation.error instanceof ApiError
+              ? lockMutation.error.message
+              : "Lock failed — please try again."}
+          </p>
+        )}
       </div>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

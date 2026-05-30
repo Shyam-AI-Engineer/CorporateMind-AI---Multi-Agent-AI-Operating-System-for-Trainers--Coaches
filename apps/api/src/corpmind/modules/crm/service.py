@@ -192,6 +192,7 @@ class CRMService:
 
         await self._repo.update_fields(lead_id, **values)
         await self._session.commit()
+        await self._session.refresh(lead)
 
         log.info("crm.lead_lost", lead_id=str(lead_id), from_stage=from_stage)
         _log_event(LeadStageChanged(
@@ -199,9 +200,6 @@ class CRMService:
             from_stage=from_stage, to_stage="lost",
         ))
 
-        lead.stage = "lost"
-        if notes is not None:
-            lead.notes = notes
         return LeadOut.model_validate(lead)
 
     # ── Metadata updates ──────────────────────────────────────────────────────
@@ -210,14 +208,14 @@ class CRMService:
         lead = await self._require_lead(lead_id)
         await self._repo.update_fields(lead_id, score=score)
         await self._session.commit()
-        lead.score = score
+        await self._session.refresh(lead)
         return LeadOut.model_validate(lead)
 
     async def add_note(self, lead_id: uuid.UUID, notes: str) -> LeadOut:
         lead = await self._require_lead(lead_id)
         await self._repo.update_fields(lead_id, notes=notes)
         await self._session.commit()
-        lead.notes = notes
+        await self._session.refresh(lead)
         return LeadOut.model_validate(lead)
 
     async def schedule_meeting(
@@ -232,7 +230,7 @@ class CRMService:
             )
         await self._repo.update_fields(lead_id, meeting_scheduled_at=meeting_at)
         await self._session.commit()
-        lead.meeting_scheduled_at = meeting_at
+        await self._session.refresh(lead)
         return LeadOut.model_validate(lead)
 
     # ── Helpers ───────────────────────────────────────────────────────────────

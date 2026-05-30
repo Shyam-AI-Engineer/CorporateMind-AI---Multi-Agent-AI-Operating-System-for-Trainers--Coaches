@@ -27,5 +27,10 @@ export const config = {
     "/outreach/:path*",
     "/analytics/:path*",
     "/admin/:path*",
+    "/trainer/:path*",
+    "/hr/:path*",
+    "/crm/:path*",
+    "/proposals/:path*",
+    "/social/:path*",
   ],
 };

@@ -4,19 +4,79 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from corpmind.core.config import settings
 from corpmind.core.database import close_db, init_db
+from corpmind.core.exceptions import CorporateMindError
 from corpmind.core.logging_setup import configure_logging
 from corpmind.core.observability import configure_sentry, configure_otel
 from corpmind.core.redis import close_redis, init_redis
 from corpmind.core.tenancy import TenantMiddleware
 
 log = structlog.get_logger(__name__)
+
+
+# ── Exception handlers ────────────────────────────────────────────────────────
+
+async def _domain_error_handler(request: Request, exc: CorporateMindError) -> JSONResponse:
+    """Translate any CorporateMindError subclass into the structured envelope."""
+    request_id = getattr(request.state, "request_id", "")
+    log.warning(
+        "domain_error",
+        code=exc.code,
+        http_status=exc.http_status,
+        message=exc.message,
+        request_id=request_id,
+    )
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"code": exc.code, "message": exc.message, "request_id": request_id},
+    )
+
+
+async def _request_validation_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Normalize Pydantic request-body validation errors into the same envelope."""
+    request_id = getattr(request.state, "request_id", "")
+    # Flatten Pydantic's nested error list into a single readable string
+    details = "; ".join(
+        f"{' → '.join(str(loc) for loc in e['loc'])}: {e['msg']}"
+        for e in exc.errors()
+    )
+    log.warning(
+        "request_validation_error",
+        details=details,
+        request_id=request_id,
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"code": "validation_error", "message": details, "request_id": request_id},
+    )
+
+
+async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all for unexpected exceptions — log with full traceback, return safe envelope."""
+    request_id = getattr(request.state, "request_id", "")
+    log.exception(
+        "unhandled_error",
+        exc_type=type(exc).__name__,
+        request_id=request_id,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "code": "internal_error",
+            "message": "An unexpected error occurred.",
+            "request_id": request_id,
+        },
+    )
 
 
 @asynccontextmanager
@@ -55,6 +115,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(TenantMiddleware)
+
+    # ── Exception handlers ─────────────────────────────────────────────────────
+    # Order matters: most-specific first. CorporateMindError before Exception.
+    app.add_exception_handler(CorporateMindError, _domain_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, _request_validation_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, _unhandled_error_handler)  # type: ignore[arg-type]
 
     # ── Prometheus metrics ─────────────────────────────────────────────────────
     Instrumentator(

@@ -8,6 +8,7 @@ import uuid
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from corpmind.core.database import set_rls_tenant
 from corpmind.core.exceptions import AuthenticationError, ConflictError
 from corpmind.core.redis import blocklist_jti, is_jti_blocked
 from corpmind.core.security import (
@@ -18,6 +19,7 @@ from corpmind.core.security import (
     hash_password,
     verify_password,
 )
+from corpmind.modules.billing.service import BillingService
 from corpmind.modules.identity.models import Org, User, Workspace
 from corpmind.modules.identity.repo import OrgRepo, UserRepo, WorkspaceRepo
 from corpmind.modules.identity.schemas import (
@@ -30,11 +32,12 @@ log = structlog.get_logger(__name__)
 
 
 class IdentityService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, billing_service: BillingService | None = None) -> None:
         self._session = session
         self._user_repo = UserRepo(session)
         self._org_repo = OrgRepo(session)
         self._ws_repo = WorkspaceRepo(session)
+        self._billing = billing_service
 
     async def register(self, req: RegisterRequest) -> TokenResponse:
         existing = await self._user_repo.find_by_email(req.email)
@@ -60,6 +63,13 @@ class IdentityService:
         )
         await self._user_repo.create(user)
 
+        # Activate RLS for the new tenant before inserting tenant-scoped rows.
+        # SET LOCAL is transaction-scoped and reverts automatically on commit/rollback.
+        await set_rls_tenant(self._session, org.id)
+        if self._billing is not None:
+            await self._billing.provision_new_tenant(org.id)
+
+        log.info("identity.registered", org_id=str(org.id), user_id=str(user.id))
         return self._issue_tokens(user, workspace)
 
     async def login(self, req: LoginRequest) -> TokenResponse:

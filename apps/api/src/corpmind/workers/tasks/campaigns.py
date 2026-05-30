@@ -74,6 +74,12 @@ async def _run_launch(
 
     from corpmind.core.config import settings
     from corpmind.core.database import set_rls_tenant
+    from corpmind.core.exceptions import (
+        ComplianceBlockError,
+        FrequencyCapExceededError,
+        OptInRequiredError,
+        UnsubscribedError,
+    )
     from corpmind.core.tenancy import TenantContext, set_tenant_context, clear_tenant_context
     from corpmind.modules.campaigns.models import Campaign
     from corpmind.modules.campaigns.repo import CampaignRepo, CampaignRecipientRepo
@@ -146,9 +152,29 @@ async def _run_launch(
                             message_id=str(outbound.id),
                         )
 
-                        # Enqueue the individual send task (existing outreach pipeline).
-                        await outreach_svc.send_message(outbound.id)
-                        sent += 1
+                        # send_message() re-runs compliance checks; it returns
+                        # status="blocked" instead of raising when the guard fires.
+                        send_resp = await outreach_svc.send_message(outbound.id)
+                        if send_resp.status == "blocked":
+                            await r_repo.update_recipient(recipient.id, status="blocked")
+                            blocked += 1
+                        else:
+                            sent += 1
+
+                    except (
+                        ComplianceBlockError,
+                        FrequencyCapExceededError,
+                        OptInRequiredError,
+                        UnsubscribedError,
+                    ) as exc:
+                        log.warning(
+                            "campaign.recipient.compliance_blocked",
+                            campaign_id=campaign_id,
+                            contact_id=str(recipient.contact_id),
+                            reason=str(exc),
+                        )
+                        await r_repo.update_recipient(recipient.id, status="blocked")
+                        blocked += 1
 
                     except Exception as exc:  # noqa: BLE001
                         log.error(

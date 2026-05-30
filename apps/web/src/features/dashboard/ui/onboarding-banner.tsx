@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import type { Route } from "next";
-import { ArrowRight, CheckCircle2, Circle } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, Circle, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTrainerProfile } from "@/features/trainer/api/use-trainer-profile";
 import { useContacts } from "@/features/hr/api/use-contacts";
@@ -30,14 +31,72 @@ const STEPS = [
 
 export function OnboardingBanner() {
   const { workspaceId } = useWorkspace();
-  const { data: profile, isLoading: profileLoading } = useTrainerProfile();
-  const { data: contactsData, isLoading: contactsLoading } = useContacts();
-  const { data: campaignsData, isLoading: campaignsLoading } = useCampaigns(
-    workspaceId,
-    { limit: 1 }
-  );
+  const {
+    data: profile,
+    isLoading: profileLoading,
+    isError: profileError,
+    refetch: refetchProfile,
+  } = useTrainerProfile();
+  const {
+    data: contactsData,
+    isLoading: contactsLoading,
+    isError: contactsError,
+    refetch: refetchContacts,
+  } = useContacts();
+  const {
+    data: campaignsData,
+    isLoading: campaignsLoading,
+    isError: campaignsError,
+    refetch: refetchCampaigns,
+  } = useCampaigns(workspaceId, { limit: 1 });
 
-  if (profileLoading || contactsLoading || campaignsLoading) return null;
+  const isLoading = profileLoading || contactsLoading || campaignsLoading;
+  const isError = profileError || contactsError || campaignsError;
+
+  if (isLoading) {
+    return (
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="p-4 space-y-3">
+          <div className="h-4 w-48 rounded bg-primary/10 animate-pulse" />
+          <div className="h-3 w-64 rounded bg-primary/10 animate-pulse" />
+          <div className="mt-2 space-y-2.5">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-5 w-full rounded bg-primary/10 animate-pulse" />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isError) {
+    const retry = () => {
+      if (profileError) void refetchProfile();
+      if (contactsError) void refetchContacts();
+      if (campaignsError) void refetchCampaigns();
+    };
+    return (
+      <Card className="border-destructive/20 bg-destructive/5">
+        <CardContent className="flex items-center justify-between gap-4 p-4">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
+            <p className="text-sm text-destructive">
+              Could not load onboarding progress.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={retry}
+            className="shrink-0 gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const done = [
     !!profile,

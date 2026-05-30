@@ -25,12 +25,16 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from corpmind.core.exceptions import ModelUnavailableError, RateLimitError
+from sqlalchemy import select
+
+from corpmind.core.exceptions import BudgetExceededError, ModelUnavailableError, RateLimitError
 from corpmind.ai.models import ModelRun
 from corpmind.ai.pricing import estimate_cost_inr
 from corpmind.ai.prompt_registry import registry as prompt_registry
 from corpmind.ai.providers.euri_http import EuriHTTPProvider, extract_content, extract_usage
 from corpmind.ai.routing import get_model_chain
+from corpmind.modules.billing.models import Subscription, UsageMeter
+from corpmind.modules.billing.repo import UsageMeterRepo
 
 log = structlog.get_logger(__name__)
 
@@ -198,8 +202,66 @@ class EuriClient:
         """Phase 2: query global Qdrant prompt cache (cosine ≥ 0.96)."""
         return None
 
-    async def _check_budget(self, _tenant_id: uuid.UUID, _task: str) -> None:
-        """Phase 2: query UsageMeter + Subscription; raise BudgetExceededError."""
+    async def _check_budget(self, tenant_id: uuid.UUID, task: str) -> None:
+        """Block the call if the tenant has exhausted its AI budget for the period.
+
+        Lookup order:
+          1. Active Subscription for tenant_id  → defines ai_budget_inr ceiling.
+          2. UsageMeter row(s) for that subscription → ai_spend_inr running total.
+
+        Permissive fall-throughs (logged, not raised):
+          - No bound DB session — agent scaffolding paths that aren't yet wired
+            into a request scope. Mirrors the policy used by _record_usage().
+          - No active subscription — un-billed sandbox/seed tenants. A WARN log
+            keeps the gap visible so it can't silently mask a real tenant.
+
+        Strict block:
+          - spent >= budget → BudgetExceededError (402, surfaced via the FastAPI
+            exception handler installed in main.py).
+        """
+        if self._session is None:
+            log.debug(
+                "llm.budget_check_skipped",
+                reason="no_session",
+                task=task,
+                tenant_id=str(tenant_id),
+            )
+            return
+
+        sub_row = await self._session.execute(
+            select(Subscription).where(
+                Subscription.tenant_id == tenant_id,
+                Subscription.status == "active",
+            )
+        )
+        subscription = sub_row.scalar_one_or_none()
+        if subscription is None:
+            log.warning(
+                "llm.budget_check_skipped",
+                reason="no_active_subscription",
+                task=task,
+                tenant_id=str(tenant_id),
+            )
+            return
+
+        meter_row = await self._session.execute(
+            select(UsageMeter).where(UsageMeter.subscription_id == subscription.id)
+        )
+        meter = meter_row.scalar_one_or_none()
+        spent = meter.ai_spend_inr if meter is not None else 0.0
+        budget = subscription.ai_budget_inr
+
+        if spent >= budget:
+            log.warning(
+                "llm.budget_exceeded",
+                task=task,
+                tenant_id=str(tenant_id),
+                spent_inr=round(spent, 4),
+                budget_inr=round(budget, 4),
+            )
+            raise BudgetExceededError(
+                f"AI budget exhausted: ₹{spent:.2f} of ₹{budget:.2f} used this period."
+            )
 
     async def _record_usage(
         self,
@@ -237,4 +299,14 @@ class EuriClient:
             run_id=run_id,
         )
         self._session.add(run)
-        # Caller commits; we only add to session here.
+
+        # Update the running spend meter so _check_budget sees current spend.
+        sub_row = await self._session.execute(
+            select(Subscription).where(
+                Subscription.tenant_id == tenant_id,
+                Subscription.status == "active",
+            )
+        )
+        subscription = sub_row.scalar_one_or_none()
+        if subscription is not None:
+            await UsageMeterRepo(self._session).increment_ai_spend(subscription.id, cost_inr)

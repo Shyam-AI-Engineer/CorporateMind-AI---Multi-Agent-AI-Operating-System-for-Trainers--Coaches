@@ -53,8 +53,12 @@ class TrainerProfileExtraction(BaseModel):
 
 class TrainerProfileUpdate(BaseModel):
     niche: str | None = None
+    bio: str | None = None
+    topics: list[str] | None = None
     tone: str | None = None
     usp: str | None = None
+    target_industries: list[str] | None = None
+    languages: list[str] | None = None
     pricing_min_inr: int | None = None
     pricing_max_inr: int | None = None
 

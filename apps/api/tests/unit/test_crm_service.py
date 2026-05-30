@@ -353,6 +353,7 @@ async def test_list_pipeline_returns_items():
     svc = CRMService(session)
 
     svc._repo.list_pipeline = AsyncMock(return_value=[_make_lead("discovered"), _make_lead("engaged")])
+    svc._repo.count_pipeline = AsyncMock(return_value=2)
 
     result = await svc.list_pipeline(_WS_ID)
 

@@ -60,7 +60,7 @@ class EuriHTTPProvider:
             if delay:
                 await asyncio.sleep(delay)
             try:
-                resp = await self._client.post("/chat/completions", json=payload)
+                resp = await self._client.post("chat/completions", json=payload)
 
                 if resp.status_code == 429:
                     log.warning(

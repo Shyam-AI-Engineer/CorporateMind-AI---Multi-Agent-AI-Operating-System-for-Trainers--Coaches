@@ -95,6 +95,20 @@ class TrainerIntelService:
         profile = await self._repo.find_for_workspace(ctx.workspace_id)
         if profile is None:
             raise NotFoundError("No trainer profile to lock.")
+        if profile.is_locked:
+            raise ConflictError("Profile is already locked.")
+        missing: list[str] = []
+        if not profile.niche:
+            missing.append("niche")
+        if not profile.bio:
+            missing.append("bio")
+        if not profile.topics:
+            missing.append("topics")
+        if missing:
+            raise ValidationError(
+                f"Profile is missing required fields: {', '.join(missing)}. "
+                "Please fill them in before locking."
+            )
         profile.is_locked = True
         profile.locked_at = datetime.now(UTC)
         await self._session.commit()

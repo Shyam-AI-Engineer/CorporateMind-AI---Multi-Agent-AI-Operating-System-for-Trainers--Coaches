@@ -57,7 +57,7 @@ class Settings(BaseSettings):
 
     # ── Euri AI Gateway ───────────────────────────────────────────────────────
     EURI_API_KEY: str
-    EURI_API_BASE_URL: str = "https://api.euricom.io/v1"
+    EURI_API_BASE_URL: str = "https://api.euron.one/api/v1/euri/"
     EURI_TIMEOUT_SECONDS: int = 60
     EURI_MAX_RETRIES: int = 3
 

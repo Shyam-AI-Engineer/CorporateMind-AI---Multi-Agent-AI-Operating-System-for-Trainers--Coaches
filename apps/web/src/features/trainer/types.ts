@@ -20,8 +20,12 @@ export interface ExtractFromTextRequest {
 
 export interface TrainerProfileUpdate {
   niche?: string | null;
+  bio?: string | null;
+  topics?: string[];
   tone?: string | null;
   usp?: string | null;
+  target_industries?: string[];
+  languages?: string[];
   pricing_min_inr?: number | null;
   pricing_max_inr?: number | null;
 }

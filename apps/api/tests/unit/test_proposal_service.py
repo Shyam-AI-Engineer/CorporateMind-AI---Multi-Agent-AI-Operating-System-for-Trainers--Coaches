@@ -340,6 +340,7 @@ async def test_list_proposals_returns_items():
     svc._repo.list_by_workspace = AsyncMock(
         return_value=[_make_proposal("draft"), _make_proposal("sent")]
     )
+    svc._repo.count_by_workspace = AsyncMock(return_value=2)
 
     result = await svc.list_proposals(_WS_ID)
 
@@ -357,6 +358,7 @@ async def test_list_proposals_empty():
     svc = ProposalService(session)
 
     svc._repo.list_by_workspace = AsyncMock(return_value=[])
+    svc._repo.count_by_workspace = AsyncMock(return_value=0)
 
     result = await svc.list_proposals(_WS_ID)
 

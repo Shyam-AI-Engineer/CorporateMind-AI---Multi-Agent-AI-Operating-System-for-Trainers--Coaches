@@ -3,35 +3,35 @@
 Maps task classes to (primary, fallback_chain) model lists.
 Adding a new task class requires an ADR (see adr.md).
 
-Cost tiers:
-- Cheap: DeepSeek, Qwen, Gemini Flash, Haiku, Phi
-- Premium: Claude Sonnet/Opus, GPT-4-class
+Model IDs use Euri gateway naming (no provider prefix):
+- Cheap: gpt-4.1-nano, gemini-2.5-flash, claude-haiku-4-5
+- Premium: claude-sonnet-4-6, claude-opus-4-7, gpt-4.1
 """
 
 from __future__ import annotations
 
 _ROUTING_MATRIX: dict[str, list[str]] = {
     # ── Classification / Extraction (cheap) ───────────────────────────────────
-    "classify_intent":      ["deepseek/deepseek-chat", "anthropic/claude-haiku-4-5", "google/gemini-flash-2.0"],
-    "extract_fields":       ["deepseek/deepseek-chat", "qwen/qwen2.5-72b", "anthropic/claude-haiku-4-5"],
-    "classify_reply":       ["deepseek/deepseek-chat", "anthropic/claude-haiku-4-5", "google/gemini-flash-2.0"],
-    "detect_sentiment":     ["deepseek/deepseek-chat", "anthropic/claude-haiku-4-5"],
-    "tag_content":          ["deepseek/deepseek-chat", "qwen/qwen2.5-72b"],
-    "rank_contacts":        ["deepseek/deepseek-chat", "anthropic/claude-haiku-4-5"],
-    "detect_duplicates":    ["deepseek/deepseek-chat", "qwen/qwen2.5-72b"],
+    "classify_intent":      ["gpt-4.1-nano", "gemini-2.5-flash", "claude-haiku-4-5"],
+    "extract_fields":       ["gpt-4.1-nano", "gemini-2.5-flash", "claude-haiku-4-5"],
+    "classify_reply":       ["gpt-4.1-nano", "gemini-2.5-flash", "claude-haiku-4-5"],
+    "detect_sentiment":     ["gpt-4.1-nano", "gemini-2.5-flash"],
+    "tag_content":          ["gpt-4.1-nano", "gemini-2.5-flash"],
+    "rank_contacts":        ["gpt-4.1-nano", "gemini-2.5-flash"],
+    "detect_duplicates":    ["gpt-4.1-nano", "gemini-2.5-flash"],
 
     # ── Personalized copy (premium) ───────────────────────────────────────────
-    "outreach_copy":        ["anthropic/claude-sonnet-4-6", "openai/gpt-4o", "anthropic/claude-haiku-4-5"],
-    "proposal_generation":  ["anthropic/claude-opus-4-7", "anthropic/claude-sonnet-4-6", "openai/gpt-4o"],
-    "viral_hooks":          ["anthropic/claude-sonnet-4-6", "openai/gpt-4o"],
-    "social_post":          ["anthropic/claude-sonnet-4-6", "deepseek/deepseek-chat"],
-    "trainer_extraction":   ["anthropic/claude-sonnet-4-6", "openai/gpt-4o-mini"],
+    "outreach_copy":        ["claude-sonnet-4-6", "gpt-4.1", "claude-haiku-4-5"],
+    "proposal_generation":  ["claude-opus-4-7", "claude-sonnet-4-6", "gpt-4.1"],
+    "viral_hooks":          ["claude-sonnet-4-6", "gpt-4.1"],
+    "social_post":          ["claude-sonnet-4-6", "gpt-4.1-mini"],
+    "trainer_extraction":   ["claude-sonnet-4-6", "gpt-4.1-mini"],
 
-    # ── Planning (premium) ───────────────────────────────────────────────────
-    "root_planning":        ["anthropic/claude-opus-4-7", "anthropic/claude-sonnet-4-6"],
+    # ── Planning (premium) ────────────────────────────────────────────────────
+    "root_planning":        ["claude-opus-4-7", "claude-sonnet-4-6"],
 }
 
-_DEFAULT_CHAIN = ["deepseek/deepseek-chat", "anthropic/claude-haiku-4-5"]
+_DEFAULT_CHAIN = ["gpt-4.1-nano", "gemini-2.5-flash"]
 
 
 def get_model_chain(task: str) -> list[str]:

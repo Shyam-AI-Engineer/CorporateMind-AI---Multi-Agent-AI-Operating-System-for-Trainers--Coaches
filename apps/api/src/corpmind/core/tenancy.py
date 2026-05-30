@@ -98,6 +98,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
             )
 
         token = set_tenant_context(ctx)
+        request.state.request_id = ctx.request_id  # available to exception handlers
         structlog.contextvars.bind_contextvars(
             tenant_id=str(ctx.org_id),
             request_id=ctx.request_id,
