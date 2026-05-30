@@ -12,6 +12,7 @@ class SubscriptionOut(BaseModel):
     id: uuid.UUID
     plan_tier: str
     status: str
+    current_period_start: datetime
     current_period_end: datetime
     ai_run_limit: int
     outreach_send_limit: int
@@ -27,3 +28,8 @@ class UsageSummary(BaseModel):
     ai_spend_inr: float
     ai_budget_inr: float
     budget_utilization_pct: float
+
+
+class BillingSummaryOut(BaseModel):
+    subscription: SubscriptionOut
+    usage: UsageSummary

@@ -8,7 +8,10 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from corpmind.core.exceptions import NotFoundError
 from corpmind.modules.billing.models import Subscription, UsageMeter
+from corpmind.modules.billing.repo import SubscriptionRepo, UsageMeterRepo
+from corpmind.modules.billing.schemas import BillingSummaryOut, SubscriptionOut, UsageSummary
 
 log = structlog.get_logger(__name__)
 
@@ -62,3 +65,40 @@ class BillingService:
             subscription_id=str(subscription.id),
             budget_inr=_STARTER_BUDGET_INR,
         )
+
+    async def get_subscription(self) -> SubscriptionOut:
+        sub = await SubscriptionRepo(self._session).find_active()
+        if sub is None:
+            raise NotFoundError("No active subscription found for this tenant")
+        return SubscriptionOut.model_validate(sub)
+
+    async def get_usage(self) -> UsageSummary:
+        sub = await SubscriptionRepo(self._session).find_active()
+        if sub is None:
+            raise NotFoundError("No active subscription found for this tenant")
+        meter = await UsageMeterRepo(self._session).find_by_subscription(sub.id)
+        return _build_usage_summary(sub, meter)
+
+    async def get_summary(self) -> BillingSummaryOut:
+        sub = await SubscriptionRepo(self._session).find_active()
+        if sub is None:
+            raise NotFoundError("No active subscription found for this tenant")
+        meter = await UsageMeterRepo(self._session).find_by_subscription(sub.id)
+        return BillingSummaryOut(
+            subscription=SubscriptionOut.model_validate(sub),
+            usage=_build_usage_summary(sub, meter),
+        )
+
+
+def _build_usage_summary(sub: Subscription, meter: UsageMeter | None) -> UsageSummary:
+    spent = meter.ai_spend_inr if meter else 0.0
+    pct = round(spent / sub.ai_budget_inr * 100, 2) if sub.ai_budget_inr > 0 else 0.0
+    return UsageSummary(
+        ai_runs_used=meter.ai_runs_used if meter else 0,
+        ai_runs_limit=sub.ai_run_limit,
+        outreach_sends_used=meter.outreach_sends_used if meter else 0,
+        outreach_sends_limit=sub.outreach_send_limit,
+        ai_spend_inr=spent,
+        ai_budget_inr=sub.ai_budget_inr,
+        budget_utilization_pct=pct,
+    )

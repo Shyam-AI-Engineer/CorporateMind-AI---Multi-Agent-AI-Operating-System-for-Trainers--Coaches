@@ -30,6 +30,12 @@ class UsageMeterRepo:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def find_by_subscription(self, subscription_id: uuid.UUID) -> UsageMeter | None:
+        result = await self._session.execute(
+            select(UsageMeter).where(UsageMeter.subscription_id == subscription_id)
+        )
+        return result.scalar_one_or_none()
+
     async def increment_ai_spend(self, subscription_id: uuid.UUID, amount_inr: float) -> None:
         """Upsert the UsageMeter row for the given subscription.
 

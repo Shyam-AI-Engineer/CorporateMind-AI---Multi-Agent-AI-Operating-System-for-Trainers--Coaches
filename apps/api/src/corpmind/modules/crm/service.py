@@ -186,37 +186,45 @@ class CRMService:
                 f"Lead is already in terminal stage '{lead.stage}'."
             )
         from_stage = lead.stage
+        # Capture tenant_id before commit expires ORM attributes
+        tenant_id = lead.tenant_id
         values: dict[str, object] = {"stage": "lost"}
         if notes is not None:
             values["notes"] = notes
 
+        # Apply updates in-memory so model_validate sees the new state
+        for k, v in values.items():
+            setattr(lead, k, v)
+        response = LeadOut.model_validate(lead)
+
         await self._repo.update_fields(lead_id, **values)
         await self._session.commit()
-        await self._session.refresh(lead)
 
         log.info("crm.lead_lost", lead_id=str(lead_id), from_stage=from_stage)
         _log_event(LeadStageChanged(
-            lead_id=lead_id, tenant_id=lead.tenant_id,
+            lead_id=lead_id, tenant_id=tenant_id,
             from_stage=from_stage, to_stage="lost",
         ))
 
-        return LeadOut.model_validate(lead)
+        return response
 
     # ── Metadata updates ──────────────────────────────────────────────────────
 
     async def update_score(self, lead_id: uuid.UUID, score: int) -> LeadOut:
         lead = await self._require_lead(lead_id)
+        lead.score = score
+        response = LeadOut.model_validate(lead)
         await self._repo.update_fields(lead_id, score=score)
         await self._session.commit()
-        await self._session.refresh(lead)
-        return LeadOut.model_validate(lead)
+        return response
 
     async def add_note(self, lead_id: uuid.UUID, notes: str) -> LeadOut:
         lead = await self._require_lead(lead_id)
+        lead.notes = notes
+        response = LeadOut.model_validate(lead)
         await self._repo.update_fields(lead_id, notes=notes)
         await self._session.commit()
-        await self._session.refresh(lead)
-        return LeadOut.model_validate(lead)
+        return response
 
     async def schedule_meeting(
         self, lead_id: uuid.UUID, meeting_at: datetime
@@ -228,10 +236,11 @@ class CRMService:
                 f"Cannot set meeting time for a lead in stage '{lead.stage}'. "
                 "Advance to 'meeting_scheduled' first."
             )
+        lead.meeting_scheduled_at = meeting_at
+        response = LeadOut.model_validate(lead)
         await self._repo.update_fields(lead_id, meeting_scheduled_at=meeting_at)
         await self._session.commit()
-        await self._session.refresh(lead)
-        return LeadOut.model_validate(lead)
+        return response
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
