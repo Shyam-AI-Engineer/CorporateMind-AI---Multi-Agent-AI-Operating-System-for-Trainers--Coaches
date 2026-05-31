@@ -244,8 +244,12 @@ class EuriClient:
             )
             return
 
+        # populate_existing=True bypasses the SQLAlchemy identity map so we
+        # always read the DB value updated by increment_ai_spend's upsert.
         meter_row = await self._session.execute(
-            select(UsageMeter).where(UsageMeter.subscription_id == subscription.id)
+            select(UsageMeter)
+            .where(UsageMeter.subscription_id == subscription.id)
+            .execution_options(populate_existing=True)
         )
         meter = meter_row.scalar_one_or_none()
         spent = meter.ai_spend_inr if meter is not None else 0.0

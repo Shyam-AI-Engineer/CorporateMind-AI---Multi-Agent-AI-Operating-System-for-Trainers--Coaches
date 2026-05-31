@@ -247,9 +247,10 @@ async def test_rls_audit_events_not_restricted(db_session, tenant_a, tenant_b) -
         tenant_id=tenant_a.org_id,
         event_type="test_event",
         actor_id=tenant_a.user_id,
+        actor_type="system",
         channel="email",
         outcome="allowed",
-        details={},
+        event_data={},
     )
     db_session.add(event)
     await db_session.flush()
