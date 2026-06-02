@@ -11,8 +11,7 @@ import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { api, ApiError } from "@/lib/api";
 
 const schema = z
   .object({
@@ -42,21 +41,20 @@ export default function SignupPage() {
   async function onSubmit(values: FormValues) {
     setServerError(null);
 
-    // Step 1: Register with the backend (unauthenticated — no Bearer token needed)
-    const res = await fetch(`${API_BASE}/api/v1/identity/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    // Step 1: Register with the backend.
+    // api.post() omits the Authorization header when there is no active session,
+    // which is correct here — /register is a public endpoint.
+    try {
+      await api.post("/api/v1/identity/register", {
         full_name: values.full_name,
         org_name: values.org_name,
         email: values.email,
         password: values.password,
-      }),
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as { message?: string };
-      setServerError(body.message ?? "Registration failed — please try again.");
+      });
+    } catch (err) {
+      setServerError(
+        err instanceof ApiError ? err.message : "Registration failed — please try again."
+      );
       return;
     }
 

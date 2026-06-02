@@ -24,7 +24,12 @@ class Settings(BaseSettings):
     APP_ENV: Literal["development", "staging", "production"] = "development"
     APP_DEBUG: bool = False
     APP_SECRET_KEY: str
-    APP_ALLOWED_HOSTS: list[str] = ["http://localhost:3000"]
+    # Both ports included: Next.js defaults to 3000 but falls back to 3001
+    # when 3000 is occupied (common on a dev machine with multiple projects).
+    APP_ALLOWED_HOSTS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ]
 
     # ── JWT ───────────────────────────────────────────────────────────────────
     JWT_ALGORITHM: str = "RS256"

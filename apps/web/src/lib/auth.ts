@@ -2,6 +2,9 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { decodeJwtPayload } from "@/lib/jwt";
 
+// Intentional duplication of lib/api.ts's API_BASE: this file runs server-side
+// inside NextAuth callbacks where next-auth/react (and its getSession) is
+// unavailable, so the central client cannot be imported here.
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 interface BackendTokenResponse {
