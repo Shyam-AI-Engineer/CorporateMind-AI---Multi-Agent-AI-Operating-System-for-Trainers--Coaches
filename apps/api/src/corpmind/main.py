@@ -106,7 +106,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── Middleware (order matters — outermost first) ───────────────────────────
+    # ── Middleware (add_middleware prepends, so last-added = outermost) ──────────
+    # Execution order on request: TenantMiddleware → CORSMiddleware → app
+    # TenantMiddleware bypasses OPTIONS so CORSMiddleware can handle preflights.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[str(o) for o in settings.APP_ALLOWED_HOSTS],

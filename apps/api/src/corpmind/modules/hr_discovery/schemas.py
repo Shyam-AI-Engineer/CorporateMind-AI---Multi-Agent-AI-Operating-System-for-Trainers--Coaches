@@ -38,8 +38,12 @@ class CompanyOut(BaseModel):
 # ── Import / enrichment ───────────────────────────────────────────────────────
 
 class ContactImportItem(BaseModel):
-    """One contact to import. Opt-in evidence is mandatory — contacts without
-    it are persisted as non_contactable and excluded from all send segments."""
+    """One contact to import.
+
+    Contacts with opted_in_at + opt_in_evidence set are marked is_contactable=True
+    and can receive outreach. Contacts missing either field are persisted as
+    is_contactable=False and excluded from all send segments.
+    """
     raw_data: str = Field(
         min_length=10,
         max_length=5_000,
@@ -50,8 +54,8 @@ class ContactImportItem(BaseModel):
         pattern="^(webinar_registration|company_website|public_directory|referral|event_badge)$",
         description="One of the allowed opt-in source types.",
     )
-    opted_in_at: datetime = Field(description="When the contact gave consent.")
-    opt_in_evidence: str = Field(min_length=5, description="URL, screenshot ref, or consent record ID.")
+    opted_in_at: datetime | None = Field(default=None, description="When the contact gave consent. Omit to import as non-contactable.")
+    opt_in_evidence: str | None = Field(default=None, min_length=5, description="URL, screenshot ref, or consent record ID. Omit to import as non-contactable.")
     company_name: str = Field(min_length=1, max_length=500)
     company_industry: str | None = None
     company_city: str | None = None
@@ -85,7 +89,7 @@ class ContactBatchImportResponse(BaseModel):
 # ── List / detail ─────────────────────────────────────────────────────────────
 
 class ContactListResponse(BaseModel):
-    contacts: list[HRContactOut]
+    items: list[HRContactOut]
     total: int
     limit: int
     offset: int
@@ -113,4 +117,4 @@ class RankedContactOut(BaseModel):
 
 
 class RankContactsResponse(BaseModel):
-    ranked: list[RankedContactOut]
+    rankings: list[RankedContactOut]

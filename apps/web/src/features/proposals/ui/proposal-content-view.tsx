@@ -6,12 +6,53 @@ interface ProposalContentViewProps {
   proposal: Proposal;
 }
 
+function renderValue(val: unknown): React.ReactNode {
+  if (typeof val === "string" || typeof val === "number") {
+    return <span>{String(val)}</span>;
+  }
+  if (Array.isArray(val)) {
+    if (val.every((item) => typeof item === "string")) {
+      return (
+        <ul className="list-disc pl-4 space-y-1">
+          {val.map((item, i) => <li key={i}>{item}</li>)}
+        </ul>
+      );
+    }
+    return (
+      <div className="space-y-2">
+        {val.map((item, i) => (
+          <div key={i} className="rounded border p-2 text-xs">
+            {Object.entries(item as Record<string, unknown>).map(([k, v]) => (
+              <div key={k}>
+                <span className="font-medium capitalize">{k.replace(/_/g, " ")}: </span>
+                <span>{String(v)}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof val === "object" && val !== null) {
+    return (
+      <div className="space-y-1">
+        {Object.entries(val as Record<string, unknown>).map(([k, v]) => (
+          <div key={k}>
+            <span className="font-medium capitalize">{k.replace(/_/g, " ")}: </span>
+            <span>{String(v)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return <span>{JSON.stringify(val)}</span>;
+}
+
 export function ProposalContentView({ proposal }: ProposalContentViewProps) {
   const { content, cloudinary_url } = proposal;
   const title = typeof content.title === "string" ? content.title : null;
   const body = typeof content.body === "string" ? content.body : null;
 
-  // Collect any extra fields the LLM may have added beyond title/body
   const extras = Object.entries(content).filter(
     ([k]) => k !== "title" && k !== "body"
   );
@@ -22,14 +63,10 @@ export function ProposalContentView({ proposal }: ProposalContentViewProps) {
         <h2 className="text-lg font-semibold leading-snug">{title}</h2>
       )}
 
-      {body ? (
+      {body && (
         <div className="whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed">
           {body}
         </div>
-      ) : (
-        <p className="text-sm text-muted-foreground italic">
-          No body content available.
-        </p>
       )}
 
       {extras.length > 0 && (
@@ -39,14 +76,16 @@ export function ProposalContentView({ proposal }: ProposalContentViewProps) {
               <dt className="text-xs font-medium text-muted-foreground capitalize">
                 {key.replace(/_/g, " ")}
               </dt>
-              <dd className="mt-0.5">
-                {typeof val === "string" || typeof val === "number"
-                  ? String(val)
-                  : JSON.stringify(val)}
-              </dd>
+              <dd className="mt-0.5">{renderValue(val)}</dd>
             </div>
           ))}
         </dl>
+      )}
+
+      {!body && extras.length === 0 && (
+        <p className="text-sm text-muted-foreground italic">
+          No proposal content available.
+        </p>
       )}
 
       {cloudinary_url && (

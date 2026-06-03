@@ -21,12 +21,13 @@ const schema = z.object({
   raw_data: z.string().min(10, "At least 10 characters").max(5000),
   source: z.string().min(1, "Required"),
   source_type: z.enum(SOURCE_TYPES as [string, ...string[]]),
-  opted_in_at: z.string().min(1, "Required"),
-  opt_in_evidence: z.string().min(5, "At least 5 characters"),
+  // Opt-in fields are optional — omitting them marks the contact as non-contactable.
+  opted_in_at: z.string().optional(),
+  opt_in_evidence: z.string().min(5, "At least 5 characters").optional().or(z.literal("")),
   company_name: z.string().min(1, "Required"),
-  company_industry: z.string().min(1, "Required"),
-  company_city: z.string().min(1, "Required"),
-  company_country: z.string().min(1, "Required"),
+  company_industry: z.string().optional(),
+  company_city: z.string().optional(),
+  company_country: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -54,9 +55,15 @@ export function ImportContactDialog({ open, onOpenChange }: ImportContactDialogP
       {
         contacts: [
           {
-            ...values,
+            raw_data: values.raw_data,
+            source: values.source,
             source_type: values.source_type as typeof SOURCE_TYPES[number],
-            opted_in_at: new Date(values.opted_in_at).toISOString(),
+            opted_in_at: values.opted_in_at ? new Date(values.opted_in_at).toISOString() : null,
+            opt_in_evidence: values.opt_in_evidence || null,
+            company_name: values.company_name,
+            company_industry: values.company_industry || null,
+            company_city: values.company_city || null,
+            company_country: values.company_country || null,
           },
         ],
       },
@@ -128,17 +135,17 @@ export function ImportContactDialog({ open, onOpenChange }: ImportContactDialogP
             </div>
           </div>
 
-          {/* Opt-in */}
+          {/* Opt-in — optional; omitting marks the contact as non-contactable */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="opted_in_at">Opted in at</Label>
+              <Label htmlFor="opted_in_at">Opted in at <span className="text-muted-foreground font-normal">(optional)</span></Label>
               <Input id="opted_in_at" type="datetime-local" {...register("opted_in_at")} />
               {errors.opted_in_at && (
                 <p className="text-xs text-destructive">{errors.opted_in_at.message}</p>
               )}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="opt_in_evidence">Opt-in evidence</Label>
+              <Label htmlFor="opt_in_evidence">Opt-in evidence <span className="text-muted-foreground font-normal">(optional)</span></Label>
               <Input
                 id="opt_in_evidence"
                 placeholder="URL, screenshot ID, or consent ref"

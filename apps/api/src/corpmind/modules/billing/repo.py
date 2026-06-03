@@ -65,3 +65,31 @@ class UsageMeterRepo:
             )
         )
         await self._session.execute(stmt)
+
+    async def increment_outreach_sends(self, subscription_id: uuid.UUID) -> None:
+        """Increment the outreach send counter by 1 for the given subscription.
+
+        Same upsert pattern as increment_ai_spend — atomic, idempotency-safe.
+        Called by the Celery send task after a successful channel dispatch.
+        """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        ctx = get_tenant_context()
+        stmt = (
+            pg_insert(UsageMeter)
+            .values(
+                id=uuid.uuid4(),
+                subscription_id=subscription_id,
+                tenant_id=ctx.org_id,
+                ai_spend_inr=0.0,
+                ai_runs_used=0,
+                outreach_sends_used=1,
+            )
+            .on_conflict_do_update(
+                constraint="uq_usage_meters_subscription_id",
+                set_={
+                    "outreach_sends_used": UsageMeter.outreach_sends_used + 1,
+                },
+            )
+        )
+        await self._session.execute(stmt)

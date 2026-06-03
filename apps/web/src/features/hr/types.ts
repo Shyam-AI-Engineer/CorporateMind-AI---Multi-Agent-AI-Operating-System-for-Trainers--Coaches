@@ -46,12 +46,12 @@ export interface ContactImportItem {
   raw_data: string;
   source: string;
   source_type: SourceType;
-  opted_in_at: string;
-  opt_in_evidence: string;
+  opted_in_at: string | null;
+  opt_in_evidence: string | null;
   company_name: string;
-  company_industry: string;
-  company_city: string;
-  company_country: string;
+  company_industry: string | null;
+  company_city: string | null;
+  company_country: string | null;
 }
 
 export interface ContactBatchImportRequest {

@@ -231,6 +231,21 @@ async def _run_send(
                         },
                     )
                 )
+                # Increment outreach send counter for billing/tier enforcement.
+                from sqlalchemy import select as sa_select
+                from corpmind.modules.billing.models import Subscription
+                from corpmind.modules.billing.repo import UsageMeterRepo
+
+                sub_row = await session.execute(
+                    sa_select(Subscription).where(
+                        Subscription.tenant_id == tenant_uuid,
+                        Subscription.status == "active",
+                    )
+                )
+                subscription = sub_row.scalar_one_or_none()
+                if subscription is not None:
+                    await UsageMeterRepo(session).increment_outreach_sends(subscription.id)
+
                 await session.commit()
                 log.info("outreach.send.success", message_id=message_id, channel=channel)
                 return {

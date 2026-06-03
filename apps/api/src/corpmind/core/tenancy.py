@@ -84,6 +84,12 @@ class TenantMiddleware(BaseHTTPMiddleware):
     """Extract tenant context from JWT and bind it for the request lifetime."""
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # OPTIONS requests are CORS preflights — they carry no credentials and must
+        # reach CORSMiddleware unmodified. Returning a 401 here would strip the
+        # Access-Control-Allow-* headers and cause the browser to report a CORS error.
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         # Skip auth for public paths
         if any(request.url.path.startswith(p) for p in _PUBLIC_PREFIXES):
             return await call_next(request)

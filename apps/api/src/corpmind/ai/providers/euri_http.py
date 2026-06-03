@@ -139,7 +139,10 @@ def extract_content(response: dict[str, Any]) -> str:
     choices = response.get("choices", [])
     if not choices:
         raise ModelUnavailableError("Empty choices in Euri response")
-    return choices[0]["message"]["content"]
+    content = choices[0]["message"]["content"]
+    if content is None:
+        raise ModelUnavailableError("Model returned null content (possible content-filter block)")
+    return content
 
 
 def extract_usage(response: dict[str, Any]) -> tuple[int, int]:

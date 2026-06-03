@@ -19,7 +19,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.ai.euri_client import EuriClient
-from corpmind.core.exceptions import ConflictError, NotFoundError
+from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationError
 from corpmind.core.tenancy import get_tenant_context
 from corpmind.modules.crm.schemas import LeadOut
 from corpmind.modules.proposals.events import ProposalGenerated, ProposalSent
@@ -51,7 +51,7 @@ class ProposalService:
         Multiple proposals per lead are allowed (re-generation creates a new record).
         """
         if lead.stage not in _ELIGIBLE_STAGES:
-            raise ConflictError(
+            raise ValidationError(
                 f"Cannot generate a proposal for lead in stage '{lead.stage}'. "
                 f"Lead must be in {sorted(_ELIGIBLE_STAGES)}."
             )

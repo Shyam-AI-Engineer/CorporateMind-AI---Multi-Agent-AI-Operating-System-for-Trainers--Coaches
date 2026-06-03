@@ -128,6 +128,9 @@ class EuriClient:
                     call_id=call_id,
                 )
                 result_text = extract_content(response)
+                if not result_text or not result_text.strip():
+                    log.warning("llm.empty_content", model=model, task=task, call_id=call_id)
+                    continue
                 tokens_in, tokens_out = extract_usage(response)
                 model_used = model
                 break

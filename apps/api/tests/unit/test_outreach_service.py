@@ -8,6 +8,7 @@ so tests stay focused on OutreachService logic, not compliance internals.
 from __future__ import annotations
 
 import json
+import sys
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from corpmind.core.exceptions import ComplianceBlockError, ConflictError, NotFoundError
+from corpmind.core.exceptions import ConflictError, NotFoundError, OptInRequiredError
 from corpmind.core.tenancy import TenantContext, set_tenant_context, clear_tenant_context
 from corpmind.modules.compliance.schemas import ComplianceCheckResult, ComplianceOutcome
 from corpmind.modules.outreach.models import OutboundMessage
@@ -209,7 +210,7 @@ async def test_generate_message_contact_not_found():
 
 @pytest.mark.asyncio
 async def test_generate_message_blocked_opt_in():
-    """ComplianceBlockError is raised when opt-in check fails (before LLM call)."""
+    """OptInRequiredError is raised when opt-in check fails (before LLM call)."""
     token = set_tenant_context(_CTX)
     session = _make_session()
 
@@ -220,7 +221,7 @@ async def test_generate_message_blocked_opt_in():
     ):
         svc = OutreachService(session)
         req = GenerateOutreachRequest(contact_id=_CONTACT_ID, channel="email")
-        with pytest.raises(ComplianceBlockError):
+        with pytest.raises(OptInRequiredError):
             await svc.generate_message(req)
 
     clear_tenant_context(token)
@@ -267,6 +268,11 @@ async def test_send_message_enqueues_task():
     svc._repo.update_status = AsyncMock()
     svc._session.commit = AsyncMock()
 
+    mock_task = MagicMock()
+    mock_task.apply_async = MagicMock()
+    mock_outreach_module = MagicMock()
+    mock_outreach_module.send_message = mock_task
+
     with (
         patch(
             "corpmind.modules.outreach.service.ComplianceService.check_opt_in",
@@ -283,11 +289,8 @@ async def test_send_message_enqueues_task():
             new_callable=AsyncMock,
             return_value=_ALLOWED,
         ),
-        patch(
-            "corpmind.workers.tasks.outreach.send_message"
-        ) as mock_task,
+        patch.dict(sys.modules, {"corpmind.workers.tasks.outreach": mock_outreach_module}),
     ):
-        mock_task.apply_async = MagicMock()
         result = await svc.send_message(_MESSAGE_ID)
 
     clear_tenant_context(token)

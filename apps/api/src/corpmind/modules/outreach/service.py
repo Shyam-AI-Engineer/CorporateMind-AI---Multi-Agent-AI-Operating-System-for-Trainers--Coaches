@@ -26,9 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.ai.euri_client import EuriClient
 from corpmind.core.exceptions import (
-    ComplianceBlockError,
     ConflictError,
     NotFoundError,
+    OptInRequiredError,
     ValidationError,
 )
 from corpmind.core.tenancy import get_tenant_context
@@ -81,7 +81,7 @@ class OutreachService:
         comp_req = _build_compliance_req(req.contact_id, req.channel, req.campaign_id, contact, ctx.org_id)
         opt_in = await self._compliance.check_opt_in(comp_req)
         if opt_in.outcome == ComplianceOutcome.BLOCKED:
-            raise ComplianceBlockError(opt_in.reason or "Opt-in required")
+            raise OptInRequiredError(opt_in.reason or "Contact has not opted in for outreach.")
 
         trainer = await self._fetch_trainer_profile(ctx.workspace_id, ctx.org_id)
 

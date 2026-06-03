@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from corpmind.core.exceptions import ConflictError, NotFoundError
+from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationError
 from corpmind.core.tenancy import TenantContext, clear_tenant_context, set_tenant_context
 from corpmind.modules.crm.schemas import LeadOut
 from corpmind.modules.proposals.models import Proposal
@@ -157,13 +157,13 @@ async def test_generate_happy_path_booked():
 
 @pytest.mark.asyncio
 async def test_generate_wrong_stage_discovered_raises():
-    """ConflictError for lead in 'discovered' stage."""
+    """ValidationError for lead in 'discovered' stage."""
     token = set_tenant_context(_CTX)
     session = _make_session()
     svc = ProposalService(session)
 
     req = GenerateProposalRequest(lead_id=_LEAD_ID, workspace_id=_WS_ID)
-    with pytest.raises(ConflictError, match="meeting_completed"):
+    with pytest.raises(ValidationError, match="meeting_completed"):
         await svc.generate(req, _make_lead("discovered"))
 
     clear_tenant_context(token)
@@ -171,13 +171,13 @@ async def test_generate_wrong_stage_discovered_raises():
 
 @pytest.mark.asyncio
 async def test_generate_wrong_stage_engaged_raises():
-    """ConflictError for lead in 'engaged' stage."""
+    """ValidationError for lead in 'engaged' stage."""
     token = set_tenant_context(_CTX)
     session = _make_session()
     svc = ProposalService(session)
 
     req = GenerateProposalRequest(lead_id=_LEAD_ID, workspace_id=_WS_ID)
-    with pytest.raises(ConflictError, match="engaged"):
+    with pytest.raises(ValidationError, match="engaged"):
         await svc.generate(req, _make_lead("engaged"))
 
     clear_tenant_context(token)
@@ -185,13 +185,13 @@ async def test_generate_wrong_stage_engaged_raises():
 
 @pytest.mark.asyncio
 async def test_generate_wrong_stage_lost_raises():
-    """ConflictError for lead in 'lost' stage."""
+    """ValidationError for lead in 'lost' stage."""
     token = set_tenant_context(_CTX)
     session = _make_session()
     svc = ProposalService(session)
 
     req = GenerateProposalRequest(lead_id=_LEAD_ID, workspace_id=_WS_ID)
-    with pytest.raises(ConflictError, match="lost"):
+    with pytest.raises(ValidationError, match="lost"):
         await svc.generate(req, _make_lead("lost"))
 
     clear_tenant_context(token)

@@ -240,7 +240,7 @@ async def test_rank_contacts_calls_llm_with_correct_task(bound_tenant) -> None:
     assert "trainer_niche" in kwargs["prompt_inputs"]
 
     # Results returned sorted by score descending
-    assert result.ranked[0].score >= result.ranked[1].score
+    assert result.rankings[0].score >= result.rankings[1].score
 
 
 @pytest.mark.asyncio
@@ -280,5 +280,5 @@ async def test_rank_contacts_skips_bad_uuid_from_model(bound_tenant) -> None:
         trainer_target_industries=["SaaS"],
     )
     result = await svc.rank_contacts(req)
-    assert len(result.ranked) == 1
-    assert result.ranked[0].contact_id == real_id
+    assert len(result.rankings) == 1
+    assert result.rankings[0].contact_id == real_id

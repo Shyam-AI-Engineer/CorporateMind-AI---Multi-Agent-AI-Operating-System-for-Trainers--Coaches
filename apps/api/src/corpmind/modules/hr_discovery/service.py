@@ -120,7 +120,7 @@ class HRDiscoveryService:
             self._contact_repo.count_contacts(filters),
         )
         return ContactListResponse(
-            contacts=[HRContactOut.model_validate(c) for c in contacts],
+            items=[HRContactOut.model_validate(c) for c in contacts],
             total=total,
             limit=limit,
             offset=offset,
@@ -181,7 +181,7 @@ class HRDiscoveryService:
                 )
             )
 
-        return RankContactsResponse(ranked=ranked)
+        return RankContactsResponse(rankings=ranked)
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
