@@ -49,12 +49,18 @@ async function request<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(
+    const err = new ApiError(
       body.code ?? "unknown_error",
       body.message ?? res.statusText,
       body.request_id ?? "",
       res.status
     );
+    // 404s are expected for optional resources (e.g. trainer profile before first extraction).
+    // Log them at debug level only so the console stays clean during normal use.
+    if (res.status !== 404) {
+      console.error(`[api] ${options.method ?? "GET"} ${path} → ${res.status}`, err.message);
+    }
+    throw err;
   }
 
   if (res.status === 204) return undefined as unknown as T;

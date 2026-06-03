@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -62,6 +63,9 @@ export function ExtractProfileDialog({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Extract Profile from Text</DialogTitle>
+          <DialogDescription>
+            Paste your bio or LinkedIn About text. AI will extract your niche, topics, tone, and pricing.
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-1">

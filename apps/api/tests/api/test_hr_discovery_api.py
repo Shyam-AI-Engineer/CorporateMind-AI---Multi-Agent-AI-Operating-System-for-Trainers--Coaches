@@ -171,7 +171,7 @@ async def test_list_contacts_empty_initially(api_client: AsyncClient) -> None:
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["contacts"] == []
+    assert body["items"] == []
     assert body["total"] == 0
 
 
@@ -185,8 +185,8 @@ async def test_list_contacts_after_import(api_client: AsyncClient) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1
-    assert len(body["contacts"]) == 1
-    contact = body["contacts"][0]
+    assert len(body["items"]) == 1
+    contact = body["items"][0]
     assert "id" in contact
     assert "full_name" in contact
     assert contact["is_contactable"] is True
@@ -231,7 +231,7 @@ async def test_list_contacts_filter_by_company_id(api_client: AsyncClient) -> No
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1
-    assert body["contacts"][0]["company_id"] == company_id
+    assert body["items"][0]["company_id"] == company_id
 
 
 @pytest.mark.asyncio
@@ -316,9 +316,9 @@ async def test_rank_contacts_returns_200(api_client: AsyncClient) -> None:
 
     assert resp.status_code == 200
     body = resp.json()
-    assert "ranked" in body
-    assert len(body["ranked"]) == 1
-    ranked_item = body["ranked"][0]
+    assert "rankings" in body
+    assert len(body["rankings"]) == 1
+    ranked_item = body["rankings"][0]
     assert ranked_item["contact_id"] == contact_id
     assert 1 <= ranked_item["score"] <= 10
     assert "reason" in ranked_item

@@ -261,6 +261,7 @@ class TestRunSend:
             patch("corpmind.core.database.set_rls_tenant", new_callable=AsyncMock),
             patch("corpmind.core.tenancy.set_tenant_context", return_value="tok"),
             patch("corpmind.core.tenancy.clear_tenant_context"),
+            patch("corpmind.modules.billing.repo.get_tenant_context") as mock_get_ctx,
             patch("corpmind.modules.outreach.repo.OutboundMessageRepo", return_value=mock_repo),
             patch("corpmind.modules.compliance.service.ComplianceService", return_value=mock_compliance),
             patch("corpmind.modules.compliance.repo.AuditRepo", return_value=mock_audit_repo),
@@ -268,6 +269,12 @@ class TestRunSend:
             patch("corpmind.modules.outreach.service.recipient_hmac", return_value="rhash"),
             patch("corpmind.modules.outreach.service._content_hash", return_value="chash"),
         ):
+            mock_ctx = MagicMock()
+            mock_ctx.tenant_id = uuid.uuid4()
+            mock_ctx.org_id = uuid.uuid4()
+            mock_ctx.workspace_id = uuid.uuid4()
+            mock_get_ctx.return_value = mock_ctx
+
             result = await _run_send(**_ids())
 
         assert result["status"] == "sent"

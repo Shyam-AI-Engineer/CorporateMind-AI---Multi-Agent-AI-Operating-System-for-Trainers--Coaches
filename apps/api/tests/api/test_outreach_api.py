@@ -237,7 +237,7 @@ async def test_generate_non_contactable_returns_422(
         headers=_auth(token),
     )
     assert resp.status_code == 422
-    assert resp.json()["code"] == "compliance_blocked"
+    assert resp.json()["code"] == "opt_in_required"
 
 
 @pytest.mark.asyncio

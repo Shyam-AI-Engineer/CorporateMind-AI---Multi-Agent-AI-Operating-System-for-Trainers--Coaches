@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -117,6 +118,9 @@ export function EditProfileDialog({
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Profile</DialogTitle>
+          <DialogDescription>
+            Update your trainer profile fields. Fields marked <span className="text-destructive">*</span> are required to lock the profile.
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
