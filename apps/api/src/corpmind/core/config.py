@@ -108,12 +108,67 @@ class Settings(BaseSettings):
     AI_DEFAULT_BUDGET_INR: float = 400.0
     AI_SEMANTIC_CACHE_THRESHOLD: float = 0.96
 
+    # ── Email Message-ID ──────────────────────────────────────────────────────
+    # Domain used as the right-hand side of SMTP Message-ID headers.
+    # Format: <ULID@MAIL_DOMAIN>  — e.g. <01ARZ3NDEKTSV4RRFFQ69G5FAV@corpmind.ai>
+    # Auto-derived from SMTP_FROM_ADDRESS if left empty.
+    # Required in production (startup fails if both MAIL_DOMAIN and SMTP_FROM_ADDRESS lack a domain).
+    MAIL_DOMAIN: str = ""
+
+    # ── Inbox / Field Encryption ──────────────────────────────────────────────
+    # INBOX_ENCRYPTION_KEY_V1: 64 hex characters = 32 bytes (AES-256 key).
+    # Generate: python -c "import os; print(os.urandom(32).hex())"
+    # Required in production. Optional in dev (inbox encrypt/decrypt raises if unset).
+    INBOX_ENCRYPTION_KEY_V1: str = ""
+    # Active key version used for all new encryptions. Old rows decrypt via the
+    # version byte embedded in their ciphertext blob — no schema change on rotation.
+    INBOX_ENCRYPTION_KEY_VERSION: int = 1
+
     @field_validator("APP_SECRET_KEY")
     @classmethod
     def secret_key_length(cls, v: str) -> str:
         if len(v) < 32:
             raise ValueError("APP_SECRET_KEY must be at least 32 characters")
         return v
+
+    @field_validator("INBOX_ENCRYPTION_KEY_V1")
+    @classmethod
+    def validate_inbox_key_v1(cls, v: str) -> str:
+        if not v:
+            return v
+        try:
+            key_bytes = bytes.fromhex(v)
+        except ValueError as exc:
+            raise ValueError("INBOX_ENCRYPTION_KEY_V1 must be valid hexadecimal") from exc
+        if len(key_bytes) != 32:
+            raise ValueError(
+                f"INBOX_ENCRYPTION_KEY_V1 must be exactly 64 hex characters (32 bytes); "
+                f"got {len(key_bytes)} bytes"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def ensure_mail_domain(self) -> "Settings":
+        """Derive MAIL_DOMAIN from SMTP_FROM_ADDRESS when not explicitly set."""
+        if not self.MAIL_DOMAIN:
+            smtp_from = self.SMTP_FROM_ADDRESS
+            if "@" in smtp_from:
+                self.MAIL_DOMAIN = smtp_from.split("@")[-1]
+        if self.APP_ENV == "production" and not self.MAIL_DOMAIN:
+            raise ValueError(
+                "MAIL_DOMAIN must be set in production (or set SMTP_FROM_ADDRESS to "
+                "an address with a domain so it can be auto-derived)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def ensure_inbox_encryption_key_in_production(self) -> "Settings":
+        if self.APP_ENV == "production" and not self.INBOX_ENCRYPTION_KEY_V1:
+            raise ValueError(
+                "INBOX_ENCRYPTION_KEY_V1 must be set in production. "
+                'Generate with: python -c "import os; print(os.urandom(32).hex())"'
+            )
+        return self
 
     @model_validator(mode="after")
     def ensure_jwt_keys(self) -> "Settings":

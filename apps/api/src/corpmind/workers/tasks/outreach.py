@@ -103,6 +103,8 @@ async def _run_send(
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from sqlalchemy import text
 
+    from ulid import ULID
+
     from corpmind.channels.email_smtp import EmailSMTPAdapter
     from corpmind.channels.base import OutboundMessage as ChannelMessage
     from corpmind.core.config import settings
@@ -144,6 +146,27 @@ async def _run_send(
                     reason="not found or not queued",
                 )
                 return {"status": "skipped", "message_id": message_id}
+
+            # Write-before-send: generate smtp_message_id once and persist it before
+            # any network I/O.  On Celery retry the existing value is reused so the
+            # same Message-ID header is sent even if the first attempt crashed after
+            # the DB commit but before aiosmtplib completed.
+            if msg.smtp_message_id is None:
+                smtp_message_id = f"<{ULID()}@{settings.MAIL_DOMAIN}>"
+                await repo.set_smtp_message_id(msg_uuid, smtp_message_id)
+                await session.commit()
+                log.info(
+                    "outreach.send.smtp_message_id_generated",
+                    message_id=message_id,
+                    smtp_message_id=smtp_message_id,
+                )
+            else:
+                smtp_message_id = msg.smtp_message_id
+                log.info(
+                    "outreach.send.smtp_message_id_reused",
+                    message_id=message_id,
+                    smtp_message_id=smtp_message_id,
+                )
 
             # Fetch contact email for compliance + channel dispatch.
             result = await session.execute(
@@ -202,7 +225,7 @@ async def _run_send(
                 template_id=None,
                 tenant_id=tenant_id,
                 request_id=request_id,
-                metadata={},
+                metadata={"smtp_message_id": smtp_message_id},
             )
             adapter = _get_adapter(channel)
             send_result = await adapter.send(channel_msg)

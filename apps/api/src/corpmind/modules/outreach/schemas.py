@@ -25,6 +25,7 @@ class OutboundMessageOut(BaseModel):
     prompt_version: str | None
     ab_variant: str | None
     status: str
+    smtp_message_id: str | None
     provider_message_id: str | None
     sent_at: datetime | None
     created_at: datetime

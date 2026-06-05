@@ -50,6 +50,27 @@ class OutboundMessageRepo:
         await self._session.flush()
         return message
 
+    async def set_smtp_message_id(
+        self,
+        message_id: uuid.UUID,
+        smtp_message_id: str,
+    ) -> None:
+        """Persist the pre-generated SMTP Message-ID before the network send.
+
+        Called once per message (write-before-send pattern).  On Celery retry the
+        caller reads the already-persisted value and skips this call.
+        Does NOT commit — the caller is responsible for committing.
+        """
+        ctx = get_tenant_context()
+        await self._session.execute(
+            update(OutboundMessage)
+            .where(
+                OutboundMessage.id == message_id,
+                OutboundMessage.tenant_id == ctx.org_id,
+            )
+            .values(smtp_message_id=smtp_message_id)
+        )
+
     async def update_status(
         self,
         message_id: uuid.UUID,

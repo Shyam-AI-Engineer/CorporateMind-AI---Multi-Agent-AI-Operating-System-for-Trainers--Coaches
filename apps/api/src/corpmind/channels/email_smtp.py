@@ -104,9 +104,15 @@ class EmailSMTPAdapter:
         from_addr = settings.SMTP_FROM_ADDRESS
         mime["From"] = email.utils.formataddr(("CorporateMind AI", from_addr))
         mime["To"] = msg.recipient_address
-        # Deterministic Message-ID so duplicate sends produce the same ID (idempotent).
-        domain = from_addr.split("@")[-1]
-        mime["Message-ID"] = f"<{msg.message_id}@{domain}>"
+        # Use the pre-generated smtp_message_id (persisted before this call) so the
+        # stored value and the sent header are always identical — critical for inbox
+        # matching via In-Reply-To / References.  Fall back to a UUID-based ID for
+        # any caller that does not pass smtp_message_id through metadata.
+        smtp_message_id = msg.metadata.get("smtp_message_id")
+        if smtp_message_id:
+            mime["Message-ID"] = smtp_message_id
+        else:
+            mime["Message-ID"] = f"<{msg.message_id}@{settings.MAIL_DOMAIN}>"
         mime.attach(MIMEText(msg.body, "plain", "utf-8"))
         return mime
 

@@ -62,6 +62,9 @@ dependencies = [
 
     # ── Email delivery ─────────────────────────────────────────────────────────
     "aiosmtplib>=3.0",
+
+    # ── Identifiers ────────────────────────────────────────────────────────────
+    "python-ulid>=2.0",         # time-sortable IDs for SMTP Message-ID headers
 ]
 
 [project.optional-dependencies]

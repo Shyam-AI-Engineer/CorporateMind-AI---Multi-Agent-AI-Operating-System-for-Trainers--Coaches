@@ -28,6 +28,11 @@ class OutboundMessage(TenantBase):
     prompt_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     ab_variant: Mapped[str | None] = mapped_column(String(10), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False, index=True)
+    # Pre-generated before SMTP send; format: <ULID@MAIL_DOMAIN>.
+    # Persisted before the network call (write-before-send idempotency) so Celery
+    # retries reuse the same Message-ID rather than creating a new one.
+    # Used by inbox sync to match inbound replies via In-Reply-To / References headers.
+    smtp_message_id: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -122,3 +122,17 @@ class HITLRequiredError(CorporateMindError):
     """Action requires human-in-the-loop approval before proceeding."""
     code = "hitl_required"
     http_status = 202
+
+
+# ── Field Encryption ──────────────────────────────────────────────────────────
+
+class EncryptionError(CorporateMindError):
+    """Encryption setup or operation failure (missing key, misconfigured registry, etc.)."""
+    code = "encryption_error"
+    http_status = 500
+
+
+class DecryptionError(CorporateMindError):
+    """Decryption failed — ciphertext is tampered, corrupted, or uses an unknown key version."""
+    code = "decryption_error"
+    http_status = 500
