@@ -65,6 +65,7 @@ app.autodiscover_tasks(
     [
         "corpmind.workers.tasks.agents",
         "corpmind.workers.tasks.campaigns",
+        "corpmind.workers.tasks.inbox",
         "corpmind.workers.tasks.outreach",
         "corpmind.workers.tasks.social",
         "corpmind.workers.tasks.analytics",
