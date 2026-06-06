@@ -75,6 +75,9 @@ _PUBLIC_PREFIXES = (
     "/api/v1/identity/register",
     "/api/v1/identity/refresh",
     "/api/v1/identity/oauth",
+    # Gmail OAuth callback — arrives as a browser redirect from Google (no JWT).
+    # The callback verifies its own CSRF state token before any DB access.
+    "/api/v1/inbox/callback",
     # Inbound webhooks verify their own HMAC before parsing
     "/api/v1/webhooks/",
 )

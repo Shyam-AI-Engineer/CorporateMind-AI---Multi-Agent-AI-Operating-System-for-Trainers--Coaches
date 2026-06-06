@@ -124,6 +124,16 @@ class Settings(BaseSettings):
     # version byte embedded in their ciphertext blob — no schema change on rotation.
     INBOX_ENCRYPTION_KEY_VERSION: int = 1
 
+    # ── Google OAuth (Gmail inbox integration) ────────────────────────────────
+    # Register at https://console.cloud.google.com/ → APIs & Services → Credentials
+    # Required scopes: openid email https://www.googleapis.com/auth/gmail.readonly
+    # Optional in dev. Inbox /connect and /callback raise 422 if unset when called.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    # Must match exactly what is registered in Google Cloud Console.
+    # Development: http://localhost:8000/api/v1/inbox/callback
+    GOOGLE_REDIRECT_URI: str = ""
+
     @field_validator("APP_SECRET_KEY")
     @classmethod
     def secret_key_length(cls, v: str) -> str:

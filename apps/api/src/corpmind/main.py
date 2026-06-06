@@ -148,7 +148,10 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.trainer_intel.api import router as trainer_router
     from corpmind.modules.social.api import router as social_router
 
+    from corpmind.modules.inbox.api import router as inbox_router
+
     app.include_router(identity_router, prefix="/api/v1/identity", tags=["identity"])
+    app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["inbox"])
     app.include_router(trainer_router, prefix="/api/v1/trainer", tags=["trainer-intel"])
     app.include_router(hr_router, prefix="/api/v1/hr", tags=["hr-discovery"])
     app.include_router(outreach_router, prefix="/api/v1/outreach", tags=["outreach"])
