@@ -30,17 +30,20 @@ from __future__ import annotations
 import hashlib
 import hmac
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.encryption import decrypt, encrypt
-from corpmind.core.exceptions import ConflictError, NotFoundError
+from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationError
 from corpmind.core.tenancy import get_tenant_context
 from corpmind.modules.inbox.models import InboxConnection, InboxMessage
+from corpmind.modules.inbox.oauth import fetch_gmail_profile, refresh_google_token, revoke_google_token
 from corpmind.modules.inbox.repo import InboxConnectionRepo, InboxMessageRepo
 from corpmind.modules.inbox.schemas import (
+    ConnectionHealthOut,
     InboxConnectionCreate,
     InboxConnectionOut,
     InboxMessageOut,
@@ -126,6 +129,143 @@ class InboxService:
             raise NotFoundError(f"Inbox connection {connection_id} not found")
         await self._session.commit()
         log.info("inbox.connection_deleted", connection_id=str(connection_id))
+
+    async def get_workspace_connection(self) -> InboxConnectionOut:
+        """Fetch the inbox connection for the caller's current workspace.
+
+        Returns the first connection found — Phase 1 supports one inbox per workspace.
+
+        Raises:
+            NotFoundError: No connection exists for this workspace.
+            DecryptionError: Stored email ciphertext is corrupted or uses an unknown key.
+        """
+        ctx = get_tenant_context()
+        connections = await self._conn_repo.find_by_workspace(ctx.workspace_id, limit=1)
+        if not connections:
+            raise NotFoundError("No inbox connection found for this workspace")
+        conn = connections[0]
+        return _to_connection_out(conn, decrypt(conn.email_address_enc))
+
+    async def disconnect_connection(self, connection_id: uuid.UUID) -> None:
+        """Revoke Google OAuth tokens and hard-delete the connection.
+
+        Token revocation is best-effort — if Google rejects or is unreachable the
+        local connection is still deleted.  inbox_messages cascade via the FK.
+
+        Raises:
+            NotFoundError: Connection not found for this tenant.
+        """
+        conn = await self._conn_repo.find_by_id(connection_id)
+        if conn is None:
+            raise NotFoundError(f"Inbox connection {connection_id} not found")
+
+        try:
+            refresh_token = decrypt(conn.refresh_token_enc)
+            await revoke_google_token(refresh_token)
+        except Exception:
+            log.warning("inbox.disconnect.revocation_failed", connection_id=str(connection_id))
+
+        await self._conn_repo.delete(connection_id)
+        await self._session.commit()
+        log.info("inbox.connection_disconnected", connection_id=str(connection_id))
+
+    async def refresh_access_token(self, connection_id: uuid.UUID) -> InboxConnectionOut:
+        """Obtain a new access token from Google using the stored refresh token.
+
+        On success: encrypts and persists the new access token + expiry, sets
+        status=active.
+        On Google rejection: marks status=revoked, commits, then re-raises
+        ValidationError so the caller can surface "re-authorization required".
+
+        Raises:
+            NotFoundError: Connection not found for this tenant.
+            ValidationError: Google rejected the refresh token.
+        """
+        conn = await self._conn_repo.find_by_id(connection_id)
+        if conn is None:
+            raise NotFoundError(f"Inbox connection {connection_id} not found")
+
+        refresh_token = decrypt(conn.refresh_token_enc)
+
+        try:
+            new_tokens = await refresh_google_token(refresh_token)
+        except ValidationError:
+            await self._conn_repo.update(connection_id, {
+                "status": "revoked",
+                "last_error": "Refresh token rejected by Google — re-authorization required",
+            })
+            await self._session.commit()
+            raise
+
+        token_expiry: datetime | None = None
+        if new_tokens.expires_in is not None:
+            token_expiry = datetime.now(UTC) + timedelta(seconds=new_tokens.expires_in)
+
+        await self._conn_repo.update(connection_id, {
+            "access_token_enc": encrypt(new_tokens.access_token),
+            "token_expiry_at": token_expiry,
+            "status": "active",
+            "last_error": None,
+        })
+        await self._session.commit()
+
+        refreshed = await self._conn_repo.find_by_id(connection_id)
+        assert refreshed is not None  # just committed it above
+        log.info("inbox.token_refreshed", connection_id=str(connection_id))
+        return _to_connection_out(refreshed, decrypt(refreshed.email_address_enc))
+
+    async def check_connection_health(self, connection_id: uuid.UUID) -> ConnectionHealthOut:
+        """Validate a connection by refreshing tokens and probing the Gmail API.
+
+        Always writes the result back to the DB so the status column stays current.
+        Returns ConnectionHealthOut with healthy=True/False and the post-check status.
+
+        Raises:
+            NotFoundError: Connection not found for this tenant.
+        """
+        conn = await self._conn_repo.find_by_id(connection_id)
+        if conn is None:
+            raise NotFoundError(f"Inbox connection {connection_id} not found")
+
+        refresh_token = decrypt(conn.refresh_token_enc)
+
+        # Step 1 — verify the refresh token is still valid.
+        try:
+            new_tokens = await refresh_google_token(refresh_token)
+        except ValidationError:
+            reason = "Refresh token revoked — re-authorization required"
+            await self._conn_repo.update(connection_id, {"status": "revoked", "last_error": reason})
+            await self._session.commit()
+            return ConnectionHealthOut(healthy=False, reason=reason, status="revoked")
+
+        access_token = new_tokens.access_token
+        token_expiry: datetime | None = None
+        if new_tokens.expires_in is not None:
+            token_expiry = datetime.now(UTC) + timedelta(seconds=new_tokens.expires_in)
+
+        # Step 2 — confirm Gmail API access with the fresh token.
+        try:
+            await fetch_gmail_profile(access_token)
+        except ValidationError:
+            reason = "Gmail API access denied — permissions may have been revoked"
+            await self._conn_repo.update(connection_id, {
+                "access_token_enc": encrypt(access_token),
+                "token_expiry_at": token_expiry,
+                "status": "needs_reauth",
+                "last_error": reason,
+            })
+            await self._session.commit()
+            return ConnectionHealthOut(healthy=False, reason=reason, status="needs_reauth")
+
+        # Healthy — persist the fresh access token.
+        await self._conn_repo.update(connection_id, {
+            "access_token_enc": encrypt(access_token),
+            "token_expiry_at": token_expiry,
+            "status": "active",
+            "last_error": None,
+        })
+        await self._session.commit()
+        return ConnectionHealthOut(healthy=True, reason=None, status="active")
 
     # ── Message Operations ─────────────────────────────────────────────────────
 

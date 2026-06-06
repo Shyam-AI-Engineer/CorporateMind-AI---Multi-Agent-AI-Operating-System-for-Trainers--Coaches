@@ -53,6 +53,20 @@ class InboxConnectionOut(BaseModel):
     updated_at: datetime
 
 
+class ConnectionHealthOut(BaseModel):
+    """Result of a connection health check.
+
+    healthy=True means the refresh token is valid and Gmail API access was confirmed.
+    reason is populated only when healthy=False; it describes the failure category.
+    status mirrors the value persisted to InboxConnection.status so callers can
+    update their UI without issuing a follow-up GET /connection.
+    """
+
+    healthy: bool
+    reason: str | None = None
+    status: str
+
+
 class InboxMessageOut(BaseModel):
     """Output DTO for a single synced inbound message.
 
