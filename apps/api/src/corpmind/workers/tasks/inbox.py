@@ -229,6 +229,7 @@ async def _run_sync(
 
                     # ── 4c. Build ORM object and persist ──────────────────────
                     inbox_msg = InboxMessage(
+                        id=uuid.uuid4(),        # set eagerly — Core insert bypasses ORM default
                         tenant_id=tenant_uuid,
                         connection_id=conn_uuid,
                         provider_message_id=summary.message_id,
@@ -244,6 +245,7 @@ async def _run_sync(
                         body_snippet_enc=None,  # service.create_if_not_exists encrypts this
                         body_truncated=body_truncated,
                         reply_intent=None,      # populated by ReplyClassifierAgent (Phase 2)
+                        synced_at=datetime.now(UTC),  # set eagerly — server_default not visible after Core insert
                     )
 
                     was_inserted, _ = await service.create_if_not_exists(inbox_msg, body_snippet)

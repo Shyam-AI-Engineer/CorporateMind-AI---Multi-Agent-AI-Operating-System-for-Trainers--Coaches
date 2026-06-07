@@ -34,6 +34,8 @@ Thumbs.db
 .env.staging
 doppler.yaml
 secrets/
+*_client.json
+client_secret*.json
 
 # ── Claude Code (per-developer settings) ─────────────────────────────────────
 .claude/settings.local.json

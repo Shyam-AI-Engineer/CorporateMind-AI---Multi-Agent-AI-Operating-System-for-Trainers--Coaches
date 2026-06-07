@@ -122,11 +122,12 @@ class InboxMessageRepo:
         """
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+        import uuid as _uuid
         ctx = get_tenant_context()
         stmt = (
             pg_insert(InboxMessage)
             .values(
-                id=message.id,
+                id=message.id if message.id is not None else _uuid.uuid4(),
                 tenant_id=ctx.org_id,
                 connection_id=message.connection_id,
                 provider_message_id=message.provider_message_id,
