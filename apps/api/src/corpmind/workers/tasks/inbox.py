@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -283,3 +284,114 @@ async def _run_sync(
     finally:
         clear_tenant_context(token)
         await engine.dispose()
+
+
+# ── Fan-out task ───────────────────────────────────────────────────────────────
+
+@app.task(
+    bind=True,
+    acks_late=True,
+    max_retries=1,
+    retry_backoff=True,
+    retry_backoff_max=60,
+    retry_jitter=True,
+    soft_time_limit=270,
+    time_limit=300,
+    queue="ingestion",
+    name="corpmind.workers.tasks.inbox.sync_all_active_connections",
+)
+def sync_all_active_connections(self: Task) -> dict:
+    """Fan out inbox sync across all active Gmail connections.
+
+    Queries every InboxConnection with status='active', then enqueues one
+    sync_gmail_messages task per connection.  Failures on individual connections
+    are isolated — a bad connection never prevents the remaining batch from being
+    queued.  sync_gmail_messages carries its own Redis NX lock, so double-fire
+    from overlapping beat intervals is naturally idempotent.
+
+    Requires the DATABASE_URL role to have BYPASSRLS (or be a superuser) because
+    this task queries all tenants with no tenant_id filter.  In dev the postgres
+    superuser satisfies this automatically.  In prod, grant BYPASSRLS to the app
+    role: ALTER ROLE corpmind_app BYPASSRLS;
+    """
+    try:
+        return asyncio.run(_run_fan_out())
+    except SoftTimeLimitExceeded:
+        log.warning("inbox.fan_out.soft_timeout")
+        raise self.retry(countdown=60)
+    except Exception as exc:
+        log.error("inbox.fan_out.error", error=str(exc))
+        raise self.retry(exc=exc)
+
+
+async def _run_fan_out() -> dict:
+    """Query all active connections and enqueue per-connection sync tasks."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from corpmind.core.config import settings
+    from corpmind.modules.inbox.models import InboxConnection
+
+    t0 = time.monotonic()
+    engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+
+    connections_scanned = 0
+    syncs_queued = 0
+    sync_failures = 0
+
+    try:
+        async with factory() as session:
+            result = await session.execute(
+                select(
+                    InboxConnection.id,
+                    InboxConnection.tenant_id,
+                    InboxConnection.workspace_id,
+                ).where(InboxConnection.status == "active")
+            )
+            rows = result.all()
+
+        connections_scanned = len(rows)
+
+        for conn_id, tenant_id, workspace_id in rows:
+            try:
+                sync_gmail_messages.apply_async(
+                    kwargs={
+                        "connection_id": str(conn_id),
+                        "tenant_id": str(tenant_id),
+                        "workspace_id": str(workspace_id),
+                        "request_id": str(uuid.uuid4()),
+                    },
+                    queue="ingestion",
+                )
+                syncs_queued += 1
+                log.info(
+                    "inbox.fan_out.queued",
+                    connection_id=str(conn_id),
+                    tenant_id=str(tenant_id),
+                )
+            except Exception as exc:
+                sync_failures += 1
+                log.error(
+                    "inbox.fan_out.enqueue_failed",
+                    connection_id=str(conn_id),
+                    tenant_id=str(tenant_id),
+                    error=str(exc),
+                )
+    finally:
+        await engine.dispose()
+
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    log.info(
+        "inbox.fan_out.complete",
+        connections_scanned=connections_scanned,
+        syncs_queued=syncs_queued,
+        sync_failures=sync_failures,
+        duration_ms=duration_ms,
+    )
+    return {
+        "connections_scanned": connections_scanned,
+        "syncs_queued": syncs_queued,
+        "sync_failures": sync_failures,
+        "duration_ms": duration_ms,
+    }

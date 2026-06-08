@@ -129,6 +129,12 @@ class Settings(BaseSettings):
     # version byte embedded in their ciphertext blob — no schema change on rotation.
     INBOX_ENCRYPTION_KEY_VERSION: int = 1
 
+    # ── Inbox Sync Schedule ───────────────────────────────────────────────────
+    # How often (in seconds) the fan-out beat job queries for active connections
+    # and enqueues per-connection sync tasks.  Decrease for near-real-time reply
+    # tracking; increase to reduce DB polling cost on large deployments.
+    INBOX_SYNC_INTERVAL_SECONDS: int = 300  # 5 minutes
+
     # ── Google OAuth (Gmail inbox integration) ────────────────────────────────
     # Register at https://console.cloud.google.com/ → APIs & Services → Credentials
     # Required scopes: openid email https://www.googleapis.com/auth/gmail.readonly

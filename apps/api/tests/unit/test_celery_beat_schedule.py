@@ -2,7 +2,7 @@
 
 Covers:
 - Module imports without error (triggers all 6 module-level statements)
-- All 8 schedule entries are registered
+- All 9 schedule entries are registered
 - Task names match the canonical Celery task registration names
 - Cadences: daily crontabs use the correct UTC hour; intervals use the right timedelta
 - Queue routing: each job lands on the correct worker queue
@@ -36,8 +36,8 @@ class TestBeatScheduleImport:
 # ── Registered entries ─────────────────────────────────────────────────────────
 
 class TestBeatScheduleEntries:
-    def test_eight_entries_registered(self):
-        assert len(_SCHEDULE) == 8
+    def test_nine_entries_registered(self):
+        assert len(_SCHEDULE) == 9
 
     def test_analytics_daily_rollup_registered(self):
         assert "analytics.daily_rollup" in _SCHEDULE

@@ -13,6 +13,7 @@ from datetime import timedelta
 
 from celery.schedules import crontab
 
+from corpmind.core.config import settings
 from corpmind.workers.celery_app import app
 
 app.conf.beat_schedule = {
@@ -70,6 +71,15 @@ app.conf.beat_schedule = {
         "task": "corpmind.workers.tasks.social.publish_scheduled_posts",
         "schedule": timedelta(minutes=15),
         "options": {"queue": "social"},
+    },
+
+    # ── Inbox sync fan-out (configurable, default every 5 minutes) ────────────
+    # Queries all active InboxConnections and enqueues one sync_gmail_messages
+    # task per connection.  Interval is tunable via INBOX_SYNC_INTERVAL_SECONDS.
+    "inbox.sync_all_active_connections": {
+        "task": "corpmind.workers.tasks.inbox.sync_all_active_connections",
+        "schedule": timedelta(seconds=settings.INBOX_SYNC_INTERVAL_SECONDS),
+        "options": {"queue": "ingestion"},
     },
 }
 
