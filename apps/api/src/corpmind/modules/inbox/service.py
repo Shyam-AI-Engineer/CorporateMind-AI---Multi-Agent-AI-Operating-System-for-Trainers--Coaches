@@ -89,7 +89,10 @@ class InboxService:
         )
         await self._conn_repo.create(conn)
         await self._session.commit()
-        await self._session.refresh(conn)
+        # No refresh needed: asyncpg uses INSERT...RETURNING so server defaults
+        # (created_at, updated_at) are already populated; expire_on_commit=False
+        # keeps them accessible post-commit without a second SELECT.
+        # A post-commit refresh would fail under RLS because SET LOCAL resets on commit.
 
         log.info("inbox.connection_created", connection_id=str(conn.id), provider=conn.provider)
         return _to_connection_out(conn, req.email_address)

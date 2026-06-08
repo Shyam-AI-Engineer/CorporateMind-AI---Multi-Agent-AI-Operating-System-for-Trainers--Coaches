@@ -89,7 +89,7 @@ async def api_client(
             await session.execute(text("SET ROLE corpmind_test"))
             ctx = get_tenant_context()
             await session.execute(
-                text(f"SET LOCAL app.tenant_id = '{ctx.org_id}'")
+                text(f"SET app.tenant_id = '{ctx.org_id}'")
             )
             try:
                 yield session
