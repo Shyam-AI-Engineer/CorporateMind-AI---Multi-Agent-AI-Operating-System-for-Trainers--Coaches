@@ -312,6 +312,38 @@ class InboxService:
         body_snippet = decrypt(msg.body_snippet_enc) if msg.body_snippet_enc else None
         return _to_message_out(msg, body_snippet)
 
+    # ── Classification ─────────────────────────────────────────────────────────
+
+    async def update_classification(
+        self,
+        message_id: uuid.UUID,
+        *,
+        intent: str,
+        confidence: float,
+        model_name: str,
+    ) -> None:
+        """Persist a ReplyClassifierAgent result on an existing inbox message.
+
+        Caller (workers/tasks/inbox.py) invokes this after create_if_not_exists
+        succeeds with was_inserted=True.  Duplicate sync runs MUST NOT re-classify
+        (cost + Langfuse spam) — the worker enforces the gate; the service is the
+        single point that touches the four classification columns.
+
+        Raises NotFoundError if the row no longer exists (the connection cascade-
+        deletion ran between the sync insert and this call — a benign race).
+        """
+        msg = await self._msg_repo.find_by_id(message_id)
+        if msg is None:
+            raise NotFoundError(f"Inbox message {message_id} not found")
+        await self._msg_repo.update_classification(
+            message_id,
+            intent=intent,
+            confidence=confidence,
+            model_name=model_name,
+            classified_at=datetime.now(UTC),
+        )
+        await self._session.commit()
+
     # ── Reply Matching ─────────────────────────────────────────────────────────
 
     async def match_reply(self, smtp_message_id: str) -> uuid.UUID | None:

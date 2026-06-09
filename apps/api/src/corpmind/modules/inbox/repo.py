@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -211,3 +213,34 @@ class InboxMessageRepo:
             .offset(offset)
         )
         return list(result.scalars().all())
+
+    async def update_classification(
+        self,
+        message_id: uuid.UUID,
+        *,
+        intent: str,
+        confidence: float,
+        model_name: str,
+        classified_at: datetime,
+    ) -> None:
+        """Set the four classification columns for one inbox_message row.
+
+        Tenant-scoped UPDATE — the WHERE clause filters on tenant_id alongside id
+        so a leaked message_id from another tenant cannot mutate this tenant's row
+        even before RLS engages (defense-in-depth).  Casting confidence to Decimal
+        preserves the [0,1] precision the model emitted (Numeric(4,3)).
+        """
+        ctx = get_tenant_context()
+        await self._session.execute(
+            update(InboxMessage)
+            .where(
+                InboxMessage.id == message_id,
+                InboxMessage.tenant_id == ctx.org_id,
+            )
+            .values(
+                reply_intent=intent,
+                confidence=Decimal(str(round(confidence, 3))),
+                classification_model=model_name,
+                classified_at=classified_at,
+            )
+        )

@@ -24,7 +24,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
+from decimal import Decimal
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -182,9 +184,26 @@ class InboxMessage(TenantBase):
     body_truncated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # ── Classification ────────────────────────────────────────────────────────
-    # Populated by ReplyClassifierAgent (Phase 2).
-    # interested | not_interested | question | out_of_office | auto_reply | unknown
-    reply_intent: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Populated by ReplyClassifierAgent after persistence; best-effort —
+    # message persistence still succeeds when classification fails, leaving
+    # all four columns NULL.  Allowed intent labels (enforced application-side):
+    # interested | not_interested | question | out_of_office | bounce | auto_reply | unknown
+    reply_intent: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, index=True
+    )
+    # Model self-reported confidence in the assigned intent, range [0.000, 1.000].
+    # Numeric(4,3) — Decimal preserves the wire-level precision the model emitted.
+    confidence: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=4, scale=3), nullable=True
+    )
+    classified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Echoes EuriClient's model_used (e.g. "gpt-4.1-nano") for cost attribution
+    # and post-hoc analysis when a model drift causes classification quality drops.
+    classification_model: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
 
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

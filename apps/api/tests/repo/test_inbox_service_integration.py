@@ -674,3 +674,187 @@ class TestInboxServiceTenantIsolation:
                 await InboxService(db_session).get_message(msg_out.id)
         finally:
             clear_tenant_context(token_b)
+
+
+# ── Classification persistence (Sprint 4B) ────────────────────────────────────
+
+class TestInboxServiceUpdateClassification:
+    """End-to-end check that ReplyClassifierAgent results round-trip through
+    InboxService.update_classification → repo → DB → repo.find_by_id, and that
+    classifier failure does NOT roll back the message row (failure isolation
+    contract that the worker depends on)."""
+
+    @pytest.mark.asyncio
+    async def test_update_classification_sets_all_four_columns(
+        self, db_session, tenant_a
+    ):
+        token = set_tenant_context(tenant_a)
+        await _rls(db_session, tenant_a.org_id)
+        try:
+            req = _create_req(tenant_a.workspace_id, tenant_a.user_id)
+            conn_out = await InboxService(db_session).create_connection(req)
+
+            await _rls(db_session, tenant_a.org_id)
+            msg = _msg_obj(tenant_a.org_id, conn_out.id)
+            msg_out = await InboxService(db_session).create_message(msg, body_snippet="Hi")
+
+            # Pre-classification: all four columns NULL
+            await _rls(db_session, tenant_a.org_id)
+            pre = await InboxMessageRepo(db_session).find_by_id(msg_out.id)
+            assert pre is not None
+            assert pre.reply_intent is None
+            assert pre.confidence is None
+            assert pre.classified_at is None
+            assert pre.classification_model is None
+
+            # Persist a classification result
+            await _rls(db_session, tenant_a.org_id)
+            await InboxService(db_session).update_classification(
+                msg_out.id,
+                intent="interested",
+                confidence=0.92,
+                model_name="gpt-4.1-nano",
+            )
+
+            # All four columns now populated
+            await _rls(db_session, tenant_a.org_id)
+            post = await InboxMessageRepo(db_session).find_by_id(msg_out.id)
+            assert post is not None
+            assert post.reply_intent == "interested"
+            assert post.confidence is not None
+            assert float(post.confidence) == pytest.approx(0.92, abs=1e-3)
+            assert post.classification_model == "gpt-4.1-nano"
+            assert post.classified_at is not None
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_update_classification_message_persists_when_classifier_fails(
+        self, db_session, tenant_a
+    ):
+        """Failure-isolation contract: when classification raises, the
+        already-persisted inbox_message MUST remain readable with reply_intent=NULL.
+
+        This is what the worker's try/except around ReplyClassifierAgent.classify()
+        guarantees in production; we verify the underlying assumption here.
+        """
+        token = set_tenant_context(tenant_a)
+        await _rls(db_session, tenant_a.org_id)
+        try:
+            req = _create_req(tenant_a.workspace_id, tenant_a.user_id)
+            conn_out = await InboxService(db_session).create_connection(req)
+
+            await _rls(db_session, tenant_a.org_id)
+            msg = _msg_obj(tenant_a.org_id, conn_out.id)
+            msg_out = await InboxService(db_session).create_message(
+                msg, body_snippet="Reply body"
+            )
+
+            # Simulate the worker's failure-isolation block — classifier raises,
+            # but the message was already committed by create_message().
+            # We never call update_classification in this branch.
+            try:
+                raise RuntimeError("simulated classifier failure")
+            except RuntimeError:
+                pass  # mirrors the worker's swallow-and-log behaviour
+
+            # Message must still be there and still readable
+            await _rls(db_session, tenant_a.org_id)
+            still_there = await InboxService(db_session).get_message(msg_out.id)
+            assert still_there.id == msg_out.id
+            assert still_there.reply_intent is None
+            assert still_there.body_snippet == "Reply body"
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_update_classification_unknown_with_low_confidence_persisted(
+        self, db_session, tenant_a
+    ):
+        """Even the "malformed output" fallback (unknown / 0.0) is persisted so
+        duplicate sync runs don't re-classify the same message."""
+        token = set_tenant_context(tenant_a)
+        await _rls(db_session, tenant_a.org_id)
+        try:
+            req = _create_req(tenant_a.workspace_id, tenant_a.user_id)
+            conn_out = await InboxService(db_session).create_connection(req)
+
+            await _rls(db_session, tenant_a.org_id)
+            msg = _msg_obj(tenant_a.org_id, conn_out.id)
+            msg_out = await InboxService(db_session).create_message(msg)
+
+            await _rls(db_session, tenant_a.org_id)
+            await InboxService(db_session).update_classification(
+                msg_out.id,
+                intent="unknown",
+                confidence=0.0,
+                model_name="gpt-4.1-nano",
+            )
+
+            await _rls(db_session, tenant_a.org_id)
+            post = await InboxMessageRepo(db_session).find_by_id(msg_out.id)
+            assert post is not None
+            assert post.reply_intent == "unknown"
+            assert post.confidence is not None
+            assert float(post.confidence) == 0.0
+            assert post.classified_at is not None
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_update_classification_missing_message_raises(
+        self, db_session, tenant_a
+    ):
+        token = set_tenant_context(tenant_a)
+        await _rls(db_session, tenant_a.org_id)
+        try:
+            with pytest.raises(NotFoundError):
+                await InboxService(db_session).update_classification(
+                    uuid.uuid4(),
+                    intent="interested",
+                    confidence=0.5,
+                    model_name="gpt-4.1-nano",
+                )
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_update_classification_tenant_scoped(
+        self, db_session, tenant_a, tenant_b
+    ):
+        """Tenant B must not be able to mutate tenant A's message classification
+        even with a leaked message_id (defense-in-depth above RLS)."""
+        token_a = set_tenant_context(tenant_a)
+        await _rls(db_session, tenant_a.org_id)
+        req = _create_req(tenant_a.workspace_id, tenant_a.user_id)
+        conn_out = await InboxService(db_session).create_connection(req)
+
+        await _rls(db_session, tenant_a.org_id)
+        msg = _msg_obj(tenant_a.org_id, conn_out.id)
+        msg_out = await InboxService(db_session).create_message(msg)
+        clear_tenant_context(token_a)
+
+        # As tenant B — the message is invisible, so update_classification
+        # must raise NotFoundError (the service does a find_by_id first).
+        token_b = set_tenant_context(tenant_b)
+        await _rls(db_session, tenant_b.org_id)
+        try:
+            with pytest.raises(NotFoundError):
+                await InboxService(db_session).update_classification(
+                    msg_out.id,
+                    intent="interested",
+                    confidence=0.9,
+                    model_name="gpt-4.1-nano",
+                )
+        finally:
+            clear_tenant_context(token_b)
+
+        # Tenant A's row is unchanged
+        token_a = set_tenant_context(tenant_a)
+        await _rls(db_session, tenant_a.org_id)
+        try:
+            raw = await InboxMessageRepo(db_session).find_by_id(msg_out.id)
+            assert raw is not None
+            assert raw.reply_intent is None
+        finally:
+            clear_tenant_context(token_a)

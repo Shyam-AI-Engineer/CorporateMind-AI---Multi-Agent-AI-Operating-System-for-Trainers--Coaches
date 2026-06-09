@@ -249,9 +249,27 @@ async def _run_sync(
                         synced_at=datetime.now(UTC),  # set eagerly — server_default not visible after Core insert
                     )
 
-                    was_inserted, _ = await service.create_if_not_exists(inbox_msg, body_snippet)
+                    was_inserted, msg_out = await service.create_if_not_exists(
+                        inbox_msg, body_snippet
+                    )
                     if was_inserted:
                         inserted_count += 1
+                        # ── 4d. Best-effort reply classification ──────────────
+                        # Persistence has already succeeded; classification is
+                        # isolated so any LLM error leaves the message in place
+                        # with reply_intent=NULL (re-classifiable later).
+                        # Duplicates are skipped here so re-syncs don't re-spend.
+                        await _classify_and_persist(
+                            service=service,
+                            session=session,
+                            message_id=msg_out.id,
+                            outbound_message_id=outbound_message_id,
+                            subject=msg_detail.subject,
+                            body_snippet=body_snippet,
+                            from_address=msg_detail.from_address,
+                            tenant_uuid=tenant_uuid,
+                            request_id=request_id,
+                        )
                     else:
                         duplicate_count += 1
 
@@ -284,6 +302,125 @@ async def _run_sync(
     finally:
         clear_tenant_context(token)
         await engine.dispose()
+
+
+# ── Classification helper ─────────────────────────────────────────────────────
+
+async def _classify_and_persist(
+    *,
+    service,
+    session,
+    message_id: uuid.UUID,
+    outbound_message_id: uuid.UUID | None,
+    subject: str | None,
+    body_snippet: str | None,
+    from_address: str,
+    tenant_uuid: uuid.UUID,
+    request_id: str,
+) -> None:
+    """Run ReplyClassifierAgent and persist its result on the inbox message.
+
+    Failure modes (all swallowed — never propagate to the sync loop):
+      - LLM models exhausted, budget exceeded, network timeout → log + event,
+        message stays with reply_intent=NULL, classified_at=NULL.
+      - Malformed model output → parser coerces to intent="unknown" /
+        confidence=0.0; we still persist that result + emit classification_failed
+        so dashboards can track the rate.
+    """
+    from corpmind.agents.reply_classifier import ReplyClassifierAgent
+    from corpmind.ai.euri_client import EuriClient
+    from corpmind.modules.inbox.events import (
+        ReplyClassificationFailed,
+        ReplyClassified,
+    )
+
+    try:
+        agent = ReplyClassifierAgent(EuriClient(session=session))
+        result = await agent.classify(
+            subject=subject,
+            body_snippet=body_snippet,
+            from_address=from_address,
+            campaign_context=None,
+            tenant_id=tenant_uuid,
+            request_id=request_id,
+        )
+    except Exception as exc:
+        # Persistence already succeeded — log + publish event, then return.
+        # _categorize_error() keeps the event payload PII-free.
+        reason = _categorize_classifier_error(exc)
+        log.warning(
+            "inbox.classify.failed",
+            message_id=str(message_id),
+            tenant_id=str(tenant_uuid),
+            reason=reason,
+            error=str(exc)[:200],
+        )
+        evt = ReplyClassificationFailed(
+            inbox_message_id=message_id,
+            tenant_id=tenant_uuid,
+            error=reason,
+        )
+        log.info("event.reply.classification_failed", **_event_fields(evt))
+        return
+
+    await service.update_classification(
+        message_id,
+        intent=result.intent,
+        confidence=result.confidence,
+        model_name=result.model_name,
+    )
+
+    if result.intent == "unknown" and result.confidence < 0.5:
+        # The model returned something we couldn't parse confidently.  We've
+        # still persisted "unknown" so the row isn't re-classified, but we
+        # emit classification_failed so the dashboard can track parse-failure rate.
+        evt_failed = ReplyClassificationFailed(
+            inbox_message_id=message_id,
+            tenant_id=tenant_uuid,
+            error="malformed_output",
+        )
+        log.info("event.reply.classification_failed", **_event_fields(evt_failed))
+        return
+
+    evt_ok = ReplyClassified(
+        inbox_message_id=message_id,
+        tenant_id=tenant_uuid,
+        intent=result.intent,
+        confidence=result.confidence,
+        model_name=result.model_name,
+        outbound_message_id=outbound_message_id,
+    )
+    log.info("event.reply.classified", **_event_fields(evt_ok))
+
+
+def _categorize_classifier_error(exc: Exception) -> str:
+    """Map exception class → short reason string for event payloads."""
+    name = type(exc).__name__
+    if name == "BudgetExceededError":
+        return "budget_exceeded"
+    if name == "ModelUnavailableError":
+        return "models_unavailable"
+    if name == "RateLimitError":
+        return "rate_limited"
+    return "internal_error"
+
+
+def _event_fields(evt) -> dict:
+    """Flatten a frozen-dataclass event into structlog-friendly fields.
+
+    UUIDs and datetimes are stringified eagerly so the JSON renderer never
+    has to round-trip them.  Out-of-band format keeps structlog binding cheap.
+    """
+    from dataclasses import asdict
+    out = {}
+    for k, v in asdict(evt).items():
+        if isinstance(v, uuid.UUID):
+            out[k] = str(v)
+        elif isinstance(v, datetime):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
 
 
 # ── Fan-out task ───────────────────────────────────────────────────────────────
