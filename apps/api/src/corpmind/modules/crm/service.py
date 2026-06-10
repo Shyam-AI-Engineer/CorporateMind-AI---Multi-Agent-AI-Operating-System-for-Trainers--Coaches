@@ -23,8 +23,12 @@ from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationErr
 from corpmind.core.tenancy import get_tenant_context
 from corpmind.modules.crm.events import LeadStageChanged, MeetingBooked
 from corpmind.modules.crm.models import Lead
-from corpmind.modules.crm.repo import LeadRepo
+from corpmind.modules.crm.repo import ActivityRepo, FollowUpTaskRepo, LeadRepo
 from corpmind.modules.crm.schemas import (
+    ActivityListOut,
+    ActivityOut,
+    FollowUpTaskListOut,
+    FollowUpTaskOut,
     LeadCreate,
     LeadListOut,
     LeadOut,
@@ -241,6 +245,71 @@ class CRMService:
         await self._repo.update_fields(lead_id, meeting_scheduled_at=meeting_at)
         await self._session.commit()
         return response
+
+    # ── Activity + follow-up read surface (Sprint 5 prerequisite) ─────────────
+
+    async def list_activities(
+        self,
+        *,
+        workspace_id: uuid.UUID | None = None,
+        lead_id: uuid.UUID | None = None,
+        contact_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> ActivityListOut:
+        """Paginated CRM activity list — used by the Activity Timeline UI.
+
+        Tenant-scope is enforced by ActivityRepo via TenantContext.  At least
+        one of workspace_id / lead_id / contact_id must be set; the route
+        validates that, not this method.
+        """
+        repo = ActivityRepo(self._session)
+        items, total = await asyncio.gather(
+            repo.list_filtered(
+                workspace_id=workspace_id,
+                lead_id=lead_id,
+                contact_id=contact_id,
+                limit=limit,
+                offset=offset,
+            ),
+            repo.count_filtered(
+                workspace_id=workspace_id,
+                lead_id=lead_id,
+                contact_id=contact_id,
+            ),
+        )
+        return ActivityListOut(
+            items=[ActivityOut.model_validate(a) for a in items],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def list_follow_up_tasks(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> FollowUpTaskListOut:
+        """Paginated follow-up task list — used by the Follow-Up Queue UI."""
+        repo = FollowUpTaskRepo(self._session)
+        items, total = await asyncio.gather(
+            repo.list_filtered(
+                workspace_id=workspace_id,
+                status=status,
+                limit=limit,
+                offset=offset,
+            ),
+            repo.count_filtered(workspace_id=workspace_id, status=status),
+        )
+        return FollowUpTaskListOut(
+            items=[FollowUpTaskOut.model_validate(t) for t in items],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

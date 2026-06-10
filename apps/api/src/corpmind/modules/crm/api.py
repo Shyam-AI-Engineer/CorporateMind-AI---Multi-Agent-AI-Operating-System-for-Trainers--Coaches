@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.database import get_session
+from corpmind.core.exceptions import ValidationError
 from corpmind.modules.crm.schemas import (
+    ActivityListOut,
+    FollowUpTaskListOut,
     LeadCreate,
     LeadListOut,
     LeadNoteUpdate,
@@ -63,6 +66,63 @@ async def list_pipeline(
 ) -> LeadListOut:
     return await CRMService(session).list_pipeline(
         workspace_id, stage=stage, limit=limit, offset=offset
+    )
+
+
+@router.get(
+    "/activities",
+    response_model=ActivityListOut,
+    summary="List CRM activities (paginated, tenant-scoped)",
+)
+async def list_activities(
+    workspace_id: uuid.UUID | None = Query(default=None),
+    lead_id: uuid.UUID | None = Query(default=None),
+    contact_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> ActivityListOut:
+    """Activity timeline rows for a workspace, lead, or contact.
+
+    At least one of `workspace_id`, `lead_id`, or `contact_id` must be set —
+    the route refuses an unscoped query so the UI cannot accidentally pull
+    every activity in the tenant.
+    """
+    if workspace_id is None and lead_id is None and contact_id is None:
+        raise ValidationError(
+            "At least one of workspace_id, lead_id, or contact_id is required"
+        )
+    return await CRMService(session).list_activities(
+        workspace_id=workspace_id,
+        lead_id=lead_id,
+        contact_id=contact_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/follow-ups",
+    response_model=FollowUpTaskListOut,
+    summary="List follow-up tasks (paginated, workspace-scoped)",
+)
+async def list_follow_ups(
+    workspace_id: uuid.UUID = Query(...),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> FollowUpTaskListOut:
+    """Pending or scheduled follow-up tasks for a workspace.
+
+    Default sort: NULL scheduled_for first ("do asap"), then chronological.
+    Filter by status (pending / done / cancelled) to drive the queue view.
+    """
+    return await CRMService(session).list_follow_up_tasks(
+        workspace_id=workspace_id,
+        status=status,
+        limit=limit,
+        offset=offset,
     )
 
 

@@ -57,6 +57,75 @@ export type PipelineStage = (typeof PIPELINE_STAGES)[number];
 
 export const TERMINAL_STAGES: ReadonlySet<string> = new Set(["booked", "lost"]);
 
+// ── Activity timeline + follow-up queue (Sprint 5) ──────────────────────────
+
+export interface Activity {
+  id: string;
+  workspace_id: string;
+  lead_id: string | null;
+  contact_id: string;
+  type: string;
+  summary: string;
+  source_inbox_message_id: string | null;
+  source_outbound_message_id: string | null;
+  created_at: string;
+}
+
+export interface ActivityListOut {
+  items: Activity[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface FollowUpTask {
+  id: string;
+  workspace_id: string;
+  lead_id: string | null;
+  contact_id: string;
+  type: string;
+  status: string;
+  scheduled_for: string | null;
+  source_inbox_message_id: string;
+  source_outbound_message_id: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FollowUpListOut {
+  items: FollowUpTask[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// Activity type vocabulary — mirrors crm/automation.py constants.
+export const ACTIVITY_CONFIG: Record<
+  string,
+  { label: string; icon: "trending-up" | "trending-down" | "help-circle" | "clock" | "mail-x" | "mail" | "alert-triangle" }
+> = {
+  lead_engaged:             { label: "Lead engaged",        icon: "trending-up" },
+  lead_cold:                { label: "Lead marked cold",    icon: "trending-down" },
+  followup_required:        { label: "Follow-up required",  icon: "help-circle" },
+  followup_scheduled:       { label: "Follow-up scheduled", icon: "clock" },
+  contact_bounced:          { label: "Contact bounced",     icon: "mail-x" },
+  auto_reply_logged:        { label: "Auto-reply received", icon: "mail" },
+  unknown_intent_logged:    { label: "Reply received",      icon: "mail" },
+  automation_failed:        { label: "Automation failed",   icon: "alert-triangle" },
+  automation_skipped:       { label: "Automation skipped",  icon: "alert-triangle" },
+};
+
+export const FOLLOW_UP_STATUS_CONFIG: Record<
+  string,
+  { label: string; variant: "warning" | "success" | "secondary" | "outline" }
+> = {
+  pending:   { label: "Pending",   variant: "warning" },
+  done:      { label: "Done",      variant: "success" },
+  cancelled: { label: "Cancelled", variant: "secondary" },
+};
+
+
 export const STAGE_CONFIG: Record<
   string,
   { label: string; colorClass: string; bgClass: string; borderClass: string }

@@ -89,4 +89,33 @@ class InboxMessageOut(BaseModel):
     body_snippet: str | None
     body_truncated: bool
     reply_intent: str | None
+    # Classification metadata populated by ReplyClassifierAgent (Sprint 4B).
+    # NULL when the message has not been classified (older rows + worker errors).
+    confidence: float | None = None
+    classified_at: datetime | None = None
+    classification_model: str | None = None
     synced_at: datetime
+
+
+# ── Read-only list DTOs (Sprint 5 prerequisite layer) ─────────────────────────
+
+class InboxConnectionListOut(BaseModel):
+    """Paginated list of inbox connections for a workspace."""
+
+    items: list[InboxConnectionOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class InboxMessageListOut(BaseModel):
+    """Paginated list of inbox messages.
+
+    Returned by GET /api/v1/inbox/messages.  Body snippets are decrypted in the
+    service before serialization, mirroring the single-message GET behaviour.
+    """
+
+    items: list[InboxMessageOut]
+    total: int
+    limit: int
+    offset: int

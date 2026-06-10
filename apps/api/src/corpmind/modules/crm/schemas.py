@@ -75,3 +75,54 @@ class PipelineStats(BaseModel):
     workspace_id: uuid.UUID
     stages: list[PipelineStageCount]
     total: int
+
+
+# ── Read-only activity + follow-up DTOs (Sprint 5 prerequisite layer) ─────────
+
+class ActivityOut(BaseModel):
+    """A single CRM activity row (Activity timeline view)."""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    lead_id: uuid.UUID | None
+    contact_id: uuid.UUID
+    type: str
+    summary: str
+    source_inbox_message_id: uuid.UUID | None
+    source_outbound_message_id: uuid.UUID | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ActivityListOut(BaseModel):
+    items: list[ActivityOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class FollowUpTaskOut(BaseModel):
+    """A single follow-up task row (Follow-Up Queue view)."""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    lead_id: uuid.UUID | None
+    contact_id: uuid.UUID
+    type: str
+    status: str
+    scheduled_for: datetime | None
+    source_inbox_message_id: uuid.UUID
+    source_outbound_message_id: uuid.UUID | None
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FollowUpTaskListOut(BaseModel):
+    items: list[FollowUpTaskOut]
+    total: int
+    limit: int
+    offset: int

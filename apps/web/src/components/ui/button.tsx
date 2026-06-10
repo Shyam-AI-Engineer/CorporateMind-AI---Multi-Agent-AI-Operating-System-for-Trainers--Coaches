@@ -1,3 +1,4 @@
+import { Slot } from "@radix-ui/react-slot";
 import { cn } from "@/lib/utils";
 
 type ButtonVariant = "default" | "secondary" | "ghost" | "destructive" | "outline";
@@ -18,19 +19,23 @@ const sizeClasses: Record<ButtonSize, string> = {
   icon: "h-10 w-10",
 };
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  /** When true, renders as its child element (uses @radix-ui/react-slot). */
+  asChild?: boolean;
 }
 
 export function Button({
   className,
   variant = "default",
   size = "default",
+  asChild = false,
   ...props
 }: ButtonProps) {
+  const Comp = asChild ? Slot : "button";
   return (
-    <button
+    <Comp
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-md font-medium",
         "ring-offset-background transition-colors",
@@ -38,7 +43,7 @@ export function Button({
         "disabled:pointer-events-none disabled:opacity-50",
         variantClasses[variant],
         sizeClasses[size],
-        className
+        className,
       )}
       {...props}
     />

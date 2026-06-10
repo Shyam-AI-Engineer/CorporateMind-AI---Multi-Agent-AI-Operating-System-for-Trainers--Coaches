@@ -51,6 +51,21 @@ class InboxConnectionRepo:
         )
         return list(result.scalars().all())
 
+    async def count_by_workspace(self, workspace_id: uuid.UUID) -> int:
+        """Total connections in a workspace for this tenant — pagination support."""
+        from sqlalchemy import func as sql_func
+
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(sql_func.count())
+            .select_from(InboxConnection)
+            .where(
+                InboxConnection.tenant_id == ctx.org_id,
+                InboxConnection.workspace_id == workspace_id,
+            )
+        )
+        return result.scalar_one()
+
     async def find_by_email_hash(
         self, email_address_hash: str
     ) -> InboxConnection | None:
@@ -203,16 +218,47 @@ class InboxMessageRepo:
         self,
         limit: int = 50,
         offset: int = 0,
+        *,
+        connection_id: uuid.UUID | None = None,
+        intent: str | None = None,
     ) -> list[InboxMessage]:
+        """Tenant-scoped paginated list ordered by received_at DESC.
+
+        Optional filters keep the same SQL path so the index plan is unchanged:
+          - connection_id: limits to messages for one Gmail account.
+          - intent:        filters on reply_intent for "show only interested".
+        """
         ctx = get_tenant_context()
-        result = await self._session.execute(
-            select(InboxMessage)
-            .where(InboxMessage.tenant_id == ctx.org_id)
-            .order_by(InboxMessage.received_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(InboxMessage).where(InboxMessage.tenant_id == ctx.org_id)
+        if connection_id is not None:
+            stmt = stmt.where(InboxMessage.connection_id == connection_id)
+        if intent is not None:
+            stmt = stmt.where(InboxMessage.reply_intent == intent)
+        stmt = stmt.order_by(InboxMessage.received_at.desc()).limit(limit).offset(offset)
+        result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def count(
+        self,
+        *,
+        connection_id: uuid.UUID | None = None,
+        intent: str | None = None,
+    ) -> int:
+        """Total count under the same filters used by list_recent — for pagination UI."""
+        from sqlalchemy import func as sql_func
+
+        ctx = get_tenant_context()
+        stmt = (
+            select(sql_func.count())
+            .select_from(InboxMessage)
+            .where(InboxMessage.tenant_id == ctx.org_id)
+        )
+        if connection_id is not None:
+            stmt = stmt.where(InboxMessage.connection_id == connection_id)
+        if intent is not None:
+            stmt = stmt.where(InboxMessage.reply_intent == intent)
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
 
     async def update_classification(
         self,

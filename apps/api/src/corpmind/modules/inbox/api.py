@@ -41,7 +41,13 @@ from corpmind.modules.inbox.oauth import (
     fetch_gmail_profile,
     generate_oauth_state,
 )
-from corpmind.modules.inbox.schemas import ConnectionHealthOut, InboxConnectionCreate, InboxConnectionOut
+from corpmind.modules.inbox.schemas import (
+    ConnectionHealthOut,
+    InboxConnectionCreate,
+    InboxConnectionListOut,
+    InboxConnectionOut,
+    InboxMessageListOut,
+)
 from corpmind.modules.inbox.service import InboxService
 
 log = structlog.get_logger(__name__)
@@ -126,6 +132,62 @@ async def get_connection(
     Raises 404 when no connection exists.  Never exposes tokens or encrypted fields.
     """
     return await InboxService(session).get_workspace_connection()
+
+
+@router.get(
+    "/connections",
+    response_model=InboxConnectionListOut,
+    summary="List inbox connections in the caller's workspace",
+)
+async def list_connections(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> InboxConnectionListOut:
+    """Paginated list of inbox connections — used by the Inbox Connections page.
+
+    Tenant-scoped via RLS + the service layer's tenant filter.  Never returns
+    tokens or encrypted ciphertext.  Phase 1 supports one connection per
+    workspace; this endpoint exists to power list UIs that future phases
+    (multi-mailbox) will populate further.
+    """
+    items, total = await InboxService(session).list_workspace_connections(
+        limit=limit, offset=offset
+    )
+    return InboxConnectionListOut(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get(
+    "/messages",
+    response_model=InboxMessageListOut,
+    summary="List inbox messages (paginated, tenant-scoped)",
+)
+async def list_messages(
+    connection_id: uuid.UUID | None = Query(default=None),
+    intent: str | None = Query(
+        default=None,
+        description="Filter by classified reply intent.",
+    ),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> InboxMessageListOut:
+    """Paginated inbox message list ordered by received_at DESC.
+
+    Optional filters:
+      - connection_id: restrict to one Gmail connection.
+      - intent: restrict to one classified intent (e.g. "interested").
+
+    Body snippets are decrypted in the service before returning.  Tokens and
+    raw ciphertext are never exposed.
+    """
+    items, total = await InboxService(session).list_messages(
+        connection_id=connection_id,
+        intent=intent,
+        limit=limit,
+        offset=offset,
+    )
+    return InboxMessageListOut(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.delete(

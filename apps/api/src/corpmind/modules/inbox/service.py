@@ -133,6 +133,65 @@ class InboxService:
         await self._session.commit()
         log.info("inbox.connection_deleted", connection_id=str(connection_id))
 
+    async def list_workspace_connections(
+        self, *, limit: int = 50, offset: int = 0
+    ) -> tuple[list[InboxConnectionOut], int]:
+        """Return all inbox connections in the caller's workspace, paginated.
+
+        Decrypts email_address for each row.  Returns (items, total) tuple so
+        the API can populate a paginated list response in one transaction.
+        """
+        import asyncio as _asyncio
+
+        ctx = get_tenant_context()
+        connections, total = await _asyncio.gather(
+            self._conn_repo.find_by_workspace(
+                ctx.workspace_id, limit=limit, offset=offset
+            ),
+            self._conn_repo.count_by_workspace(ctx.workspace_id),
+        )
+        items = [
+            _to_connection_out(conn, decrypt(conn.email_address_enc))
+            for conn in connections
+        ]
+        return items, total
+
+    async def list_messages(
+        self,
+        *,
+        connection_id: uuid.UUID | None = None,
+        intent: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[InboxMessageOut], int]:
+        """Tenant-scoped paginated inbox message list.
+
+        Body snippets are decrypted per row.  When connection_id is provided we
+        also verify it belongs to this tenant — without that check, a leaked
+        connection_id from another tenant would silently return zero rows
+        (RLS handles isolation but the explicit check produces a clearer 404
+        path for the API layer if we ever need it).
+        """
+        import asyncio as _asyncio
+
+        messages, total = await _asyncio.gather(
+            self._msg_repo.list_recent(
+                limit=limit,
+                offset=offset,
+                connection_id=connection_id,
+                intent=intent,
+            ),
+            self._msg_repo.count(connection_id=connection_id, intent=intent),
+        )
+        items = [
+            _to_message_out(
+                msg,
+                decrypt(msg.body_snippet_enc) if msg.body_snippet_enc else None,
+            )
+            for msg in messages
+        ]
+        return items, total
+
     async def get_workspace_connection(self) -> InboxConnectionOut:
         """Fetch the inbox connection for the caller's current workspace.
 
@@ -412,5 +471,9 @@ def _to_message_out(msg: InboxMessage, body_snippet: str | None) -> InboxMessage
         body_snippet=body_snippet,
         body_truncated=msg.body_truncated,
         reply_intent=msg.reply_intent,
+        # Numeric(4,3) Decimal → float for JSON serialization.
+        confidence=float(msg.confidence) if msg.confidence is not None else None,
+        classified_at=msg.classified_at,
+        classification_model=msg.classification_model,
         synced_at=msg.synced_at,
     )

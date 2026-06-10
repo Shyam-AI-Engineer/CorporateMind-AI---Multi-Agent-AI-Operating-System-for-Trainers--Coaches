@@ -370,6 +370,20 @@ async def _classify_and_persist(
         model_name=result.model_name,
     )
 
+    # ── CRM automation (Sprint 4C) ──────────────────────────────────────────
+    # In the same transaction scope but fully isolated — any exception
+    # leaves classification persisted and the message in place.
+    # Skipped for "unknown" with low confidence so we don't drive CRM off
+    # a low-quality signal; activity-only intents still fire.
+    if not (result.intent == "unknown" and result.confidence < 0.5):
+        await _run_reply_automation(
+            session=session,
+            inbox_message_id=message_id,
+            tenant_id=tenant_uuid,
+            intent=result.intent,
+            outbound_message_id=outbound_message_id,
+        )
+
     if result.intent == "unknown" and result.confidence < 0.5:
         # The model returned something we couldn't parse confidently.  We've
         # still persisted "unknown" so the row isn't re-classified, but we
@@ -403,6 +417,47 @@ def _categorize_classifier_error(exc: Exception) -> str:
     if name == "RateLimitError":
         return "rate_limited"
     return "internal_error"
+
+
+async def _run_reply_automation(
+    *,
+    session,
+    inbox_message_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    intent: str,
+    outbound_message_id: uuid.UUID | None,
+) -> None:
+    """Drive ReplyAutomationService for one classified reply.
+
+    Best-effort: any exception inside the service is caught here so
+    classification persistence is never affected.  Idempotency is enforced
+    inside the service via the automation log table — calling this twice
+    for the same inbox_message_id is safe.
+    """
+    from corpmind.modules.crm.automation import ReplyAutomationService
+
+    try:
+        svc = ReplyAutomationService(session)
+        result = await svc.handle_classified(
+            inbox_message_id=inbox_message_id,
+            tenant_id=tenant_id,
+            intent=intent,
+            outbound_message_id=outbound_message_id,
+        )
+        log.info(
+            "inbox.automation.complete",
+            inbox_message_id=str(inbox_message_id),
+            intent=intent,
+            outcome=result.outcome,
+            reason=result.reason,
+        )
+    except Exception as exc:
+        log.error(
+            "inbox.automation.error",
+            inbox_message_id=str(inbox_message_id),
+            intent=intent,
+            error=str(exc)[:200],
+        )
 
 
 def _event_fields(evt) -> dict:
