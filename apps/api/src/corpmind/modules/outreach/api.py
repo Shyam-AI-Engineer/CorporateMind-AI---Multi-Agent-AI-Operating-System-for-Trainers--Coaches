@@ -4,18 +4,34 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.database import get_session
 from corpmind.modules.outreach.schemas import (
     GenerateOutreachRequest,
+    OutboundMessageListOut,
     OutboundMessageOut,
     SendMessageResponse,
 )
 from corpmind.modules.outreach.service import OutreachService
 
 router = APIRouter()
+
+
+@router.get(
+    "/",
+    response_model=OutboundMessageListOut,
+    summary="List outbound messages for a campaign",
+)
+async def list_messages(
+    campaign_id: uuid.UUID = Query(..., description="Filter by campaign"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> OutboundMessageListOut:
+    svc = OutreachService(session)
+    return await svc.list_messages_by_campaign(campaign_id, limit=limit, offset=offset)
 
 
 @router.post(

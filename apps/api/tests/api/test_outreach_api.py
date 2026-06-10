@@ -424,3 +424,108 @@ async def test_tenant_isolation_message_not_visible_to_other_tenant(
     )
     assert resp.status_code == 404
     assert resp.json()["code"] == "not_found"
+
+
+# ── GET / (list by campaign) ──────────────────────────────────────────────────
+
+
+async def _create_campaign(client: AsyncClient, token: str, workspace_id: str) -> str:
+    """POST /campaigns/ and return the campaign id."""
+    resp = await client.post(
+        "/api/v1/campaigns/",
+        json={"name": "Test Campaign", "channel": "email", "workspace_id": workspace_id},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201, f"_create_campaign failed: {resp.text}"
+    return resp.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_list_messages_by_campaign_returns_items(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    contact_id = await _seed_contact(db_engine, claims["org_id"])
+    campaign_id = await _create_campaign(api_client, token, claims["workspace_id"])
+
+    with patch(
+        "corpmind.ai.euri_client.EuriClient.chat",
+        new_callable=AsyncMock,
+        return_value=_COPY_RESPONSE,
+    ):
+        resp = await api_client.post(
+            "/api/v1/outreach/generate",
+            json={"contact_id": contact_id, "channel": "email", "campaign_id": campaign_id},
+            headers=_auth(token),
+        )
+    assert resp.status_code == 201
+
+    list_resp = await api_client.get(
+        f"/api/v1/outreach/?campaign_id={campaign_id}",
+        headers=_auth(token),
+    )
+    assert list_resp.status_code == 200
+    body = list_resp.json()
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+    assert body["items"][0]["campaign_id"] == campaign_id
+    assert body["items"][0]["status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_list_messages_unknown_campaign_returns_empty(
+    api_client: AsyncClient,
+) -> None:
+    """A campaign_id with no messages returns an empty list, not a 404."""
+    user = await make_user(api_client)
+    resp = await api_client.get(
+        f"/api/v1/outreach/?campaign_id={uuid.uuid4()}",
+        headers=_auth(user["tokens"]["access_token"]),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 0
+    assert body["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_messages_unauthenticated_returns_401(api_client: AsyncClient) -> None:
+    resp = await api_client.get(f"/api/v1/outreach/?campaign_id={uuid.uuid4()}")
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "unauthenticated"
+
+
+@pytest.mark.asyncio
+async def test_list_messages_tenant_isolation(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """Tenant B's list call for tenant A's campaign returns empty — not a 404."""
+    user_a = await make_user(api_client)
+    user_b = await make_user(api_client)
+
+    token_a = user_a["tokens"]["access_token"]
+    claims_a = _claims(token_a)
+
+    contact_id = await _seed_contact(db_engine, claims_a["org_id"])
+    campaign_id = await _create_campaign(api_client, token_a, claims_a["workspace_id"])
+
+    with patch(
+        "corpmind.ai.euri_client.EuriClient.chat",
+        new_callable=AsyncMock,
+        return_value=_COPY_RESPONSE,
+    ):
+        await api_client.post(
+            "/api/v1/outreach/generate",
+            json={"contact_id": contact_id, "channel": "email", "campaign_id": campaign_id},
+            headers=_auth(token_a),
+        )
+
+    resp = await api_client.get(
+        f"/api/v1/outreach/?campaign_id={campaign_id}",
+        headers=_auth(user_b["tokens"]["access_token"]),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0

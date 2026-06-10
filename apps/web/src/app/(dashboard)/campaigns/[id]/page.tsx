@@ -6,6 +6,7 @@ import { useCampaign } from "@/features/campaigns/api/use-campaign";
 import { CampaignStatusBadge } from "@/features/campaigns/ui/campaign-status-badge";
 import { CampaignActions } from "@/features/campaigns/ui/campaign-actions";
 import { AddRecipientsPanel } from "@/features/campaigns/ui/add-recipients-panel";
+import { OutreachPreview } from "@/features/campaigns/ui/outreach-preview";
 import { RecipientsList } from "@/features/campaigns/ui/recipients-list";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CHANNEL_CONFIG } from "@/features/campaigns/types";
@@ -109,6 +110,17 @@ export default function CampaignDetailPage() {
       <div className="space-y-3">
         <h2 className="text-sm font-semibold">Recipients</h2>
         <RecipientsList campaignId={id} campaignStatus={campaign.status} />
+      </div>
+
+      {/* Generated outreach preview */}
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold">Generated Messages</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            AI-generated copy produced for contacts in this campaign. Expand a row to read the full message.
+          </p>
+        </div>
+        <OutreachPreview campaignId={id} />
       </div>
     </div>
   );

@@ -22,6 +22,13 @@ export interface OutboundMessage {
   created_at: string;
 }
 
+export interface OutboundMessageListOut {
+  items: OutboundMessage[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface SendMessageResponse {
   message_id: string;
   status: "queued" | "blocked";

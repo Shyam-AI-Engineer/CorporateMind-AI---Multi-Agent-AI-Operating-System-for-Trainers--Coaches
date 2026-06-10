@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.tenancy import get_tenant_context
@@ -44,6 +44,35 @@ class OutboundMessageRepo:
             .offset(offset)
         )
         return list(result.scalars().all())
+
+    async def list_by_campaign(
+        self,
+        campaign_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[OutboundMessage]:
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(OutboundMessage)
+            .where(
+                OutboundMessage.campaign_id == campaign_id,
+                OutboundMessage.tenant_id == ctx.org_id,
+            )
+            .order_by(OutboundMessage.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())
+
+    async def count_by_campaign(self, campaign_id: uuid.UUID) -> int:
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(func.count(OutboundMessage.id)).where(
+                OutboundMessage.campaign_id == campaign_id,
+                OutboundMessage.tenant_id == ctx.org_id,
+            )
+        )
+        return result.scalar_one()
 
     async def create(self, message: OutboundMessage) -> OutboundMessage:
         self._session.add(message)

@@ -33,6 +33,13 @@ class OutboundMessageOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OutboundMessageListOut(BaseModel):
+    items: list[OutboundMessageOut]
+    total: int
+    limit: int
+    offset: int
+
+
 class SendMessageResponse(BaseModel):
     message_id: uuid.UUID
     status: str  # queued | blocked

@@ -41,6 +41,7 @@ from corpmind.modules.outreach.models import OutboundMessage
 from corpmind.modules.outreach.repo import OutboundMessageRepo
 from corpmind.modules.outreach.schemas import (
     GenerateOutreachRequest,
+    OutboundMessageListOut,
     OutboundMessageOut,
     SendMessageResponse,
 )
@@ -179,6 +180,21 @@ class OutreachService:
         if msg is None:
             raise NotFoundError(f"Message {message_id} not found")
         return OutboundMessageOut.model_validate(msg)
+
+    async def list_messages_by_campaign(
+        self,
+        campaign_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> OutboundMessageListOut:
+        items = await self._repo.list_by_campaign(campaign_id, limit=limit, offset=offset)
+        total = await self._repo.count_by_campaign(campaign_id)
+        return OutboundMessageListOut(
+            items=[OutboundMessageOut.model_validate(m) for m in items],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     # ── Data fetching (raw SQL — no cross-module ORM model imports) ───────────
 
