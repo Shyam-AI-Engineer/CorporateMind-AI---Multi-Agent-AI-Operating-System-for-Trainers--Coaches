@@ -1,0 +1,29 @@
+description: Empty CRM notes and no meeting date — model must produce a valid generic proposal.
+vars:
+  contact_id: "00000000-0000-0000-0000-000000000003"
+  lead_stage: "meeting_completed"
+  lead_score: "60"
+  lead_notes: ""
+  meeting_at: ""
+assert:
+  # Must still produce a usable title even with no context
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.title === "string" && o.title.trim().length >= 10;
+  # Must produce at least 1 value_proposition item — even for sparse input
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.value_proposition) && o.value_proposition.length >= 1;
+  # Must produce a call_to_action even without contact context
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.call_to_action === "string" && o.call_to_action.trim().length >= 10;
+  # Must produce a proposed_training block with at least a topic
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof ((o.proposed_training || {}).topic) === "string"
+        && o.proposed_training.topic.length > 0;

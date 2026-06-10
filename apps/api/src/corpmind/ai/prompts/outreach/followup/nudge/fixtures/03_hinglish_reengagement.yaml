@@ -1,0 +1,29 @@
+description: Hinglish re-engagement — model should code-switch naturally and still thread + stay factual.
+vars:
+  trainer_niche: "Sales Enablement"
+  trainer_topics: "consultative selling, negotiation, frontline coaching"
+  trainer_usp: "Lifted quarterly conversion rates by 20% for retail frontline teams."
+  trainer_bio: "Worked with frontline managers at large Indian retail chains."
+  trainer_pricing: "on request"
+  trainer_tone: "conversational"
+  trainer_industries: "Retail, FMCG"
+  contact_name: "Vikram Rao"
+  contact_title: "L&D Head"
+  contact_company: "Reliance Retail"
+  contact_industry: "Retail"
+  contact_language: "hi"
+  original_subject: "Reliance Retail ke liye sales training reimagined"
+  original_body: "Namaste Vikram ji, frontline sales training mein floor reality alag hoti hai. 15 minute baat karein?"
+  days_since: "10"
+  lead_stage: "engaged"
+assert:
+  # Language tag should be Hindi/Hinglish.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return /^hi/i.test(o.language_used);
+  # Must reference the original (Re:) and stay within nudge length.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return /^re:/i.test(o.subject.trim()) && o.body.trim().split(/\s+/).length <= 160;

@@ -583,6 +583,89 @@ async def test_get_message_decryption_error_propagates():
     clear_tenant_context(token)
 
 
+# ── get_decrypted_snippet (Sprint 8A — ADR-0008 follow-up context hydration) ─────
+
+@pytest.mark.asyncio
+async def test_get_decrypted_snippet_returns_plaintext():
+    """Returns ONLY the decrypted snippet string (not a DTO) when present."""
+    token = set_tenant_context(_CTX)
+    session = _mock_session()
+
+    msg = _make_msg()
+    msg.body_snippet_enc = "enc:body"
+
+    with patch(
+        "corpmind.modules.inbox.service.decrypt", return_value="Do you cover pricing?"
+    ) as mock_dec:
+        svc = InboxService(session)
+        svc._msg_repo.find_by_id = AsyncMock(return_value=msg)
+
+        result = await svc.get_decrypted_snippet(_MSG_ID)
+
+    clear_tenant_context(token)
+
+    assert result == "Do you cover pricing?"
+    mock_dec.assert_called_once_with("enc:body")
+
+
+@pytest.mark.asyncio
+async def test_get_decrypted_snippet_none_enc_returns_none_without_decrypt():
+    """Returns None and never calls decrypt when body_snippet_enc is NULL."""
+    token = set_tenant_context(_CTX)
+    session = _mock_session()
+
+    msg = _make_msg()
+    msg.body_snippet_enc = None
+
+    with patch("corpmind.modules.inbox.service.decrypt") as mock_dec:
+        svc = InboxService(session)
+        svc._msg_repo.find_by_id = AsyncMock(return_value=msg)
+
+        result = await svc.get_decrypted_snippet(_MSG_ID)
+
+    clear_tenant_context(token)
+
+    assert result is None
+    mock_dec.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_decrypted_snippet_not_found_raises():
+    """NotFoundError when the message does not exist for this tenant."""
+    token = set_tenant_context(_CTX)
+    session = _mock_session()
+
+    svc = InboxService(session)
+    svc._msg_repo.find_by_id = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundError, match=str(_MSG_ID)):
+        await svc.get_decrypted_snippet(_MSG_ID)
+
+    clear_tenant_context(token)
+
+
+@pytest.mark.asyncio
+async def test_get_decrypted_snippet_decryption_error_propagates():
+    """A corrupted snippet ciphertext must surface, not be swallowed."""
+    token = set_tenant_context(_CTX)
+    session = _mock_session()
+
+    msg = _make_msg()
+    msg.body_snippet_enc = "corrupted-ciphertext"
+
+    with patch(
+        "corpmind.modules.inbox.service.decrypt",
+        side_effect=DecryptionError("GCM tag mismatch"),
+    ):
+        svc = InboxService(session)
+        svc._msg_repo.find_by_id = AsyncMock(return_value=msg)
+
+        with pytest.raises(DecryptionError):
+            await svc.get_decrypted_snippet(_MSG_ID)
+
+    clear_tenant_context(token)
+
+
 # ── match_reply ────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

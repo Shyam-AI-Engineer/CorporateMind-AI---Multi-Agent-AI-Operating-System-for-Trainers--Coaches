@@ -1,0 +1,29 @@
+description: Sparse context (original body unavailable, unknown days_since) — model must still produce a valid threaded nudge without inventing facts.
+vars:
+  trainer_niche: "Corporate Training"
+  trainer_topics: "communication, productivity"
+  trainer_usp: ""
+  trainer_bio: ""
+  trainer_pricing: "on request"
+  trainer_tone: "semi_formal"
+  trainer_industries: ""
+  contact_name: "HR Professional"
+  contact_title: "HR Manager"
+  contact_company: "your organisation"
+  contact_industry: ""
+  contact_language: "en"
+  original_subject: "A quick idea for your team"
+  original_body: "(original email body unavailable)"
+  days_since: "a few"
+  lead_stage: "unknown"
+assert:
+  # Even with no original body, it must produce a usable subject and body.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return o.subject.trim().length > 0 && o.body.trim().split(/\s+/).length >= 30;
+  # Must not fabricate specific past clients, numbers, or pricing from empty fields.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return !/(₹|rs\.?|inr)\s*\d/i.test(o.body);

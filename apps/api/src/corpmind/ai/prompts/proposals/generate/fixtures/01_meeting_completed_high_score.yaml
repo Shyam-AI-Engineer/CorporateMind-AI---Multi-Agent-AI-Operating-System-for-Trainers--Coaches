@@ -1,0 +1,34 @@
+description: Senior HR lead — meeting completed, high score, rich notes. Happy path.
+vars:
+  contact_id: "00000000-0000-0000-0000-000000000001"
+  lead_stage: "meeting_completed"
+  lead_score: "85"
+  lead_notes: |
+    Priya Kapoor is Head of L&D at Infosys Pune. Meeting went very well — she is
+    looking for a 2-day leadership workshop for 30 mid-level managers in Q3 2026.
+    Budget is approximately INR 3,00,000. She wants the programme delivered in
+    Mumbai or Pune, in-person. Follow up with a formal proposal by end of week.
+    Key pain points: low engagement scores, high attrition in the senior IC band.
+  meeting_at: "2026-06-08T10:00:00+05:30"
+assert:
+  # The proposed_training format should be in-person given the notes
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      const fmt = (o.proposed_training || {}).format || "";
+      return fmt === "in-person" || fmt === "hybrid";
+  # executive_summary should be substantive (min 50 chars)
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.executive_summary === "string" && o.executive_summary.length >= 50;
+  # value_proposition should have at least 3 items given high-quality input
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.value_proposition) && o.value_proposition.length >= 3;
+  # proposed_agenda should reflect a 2-day programme (at least 2 sessions)
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.proposed_agenda) && o.proposed_agenda.length >= 2;

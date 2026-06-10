@@ -1,0 +1,35 @@
+description: Booked lead — training confirmed, proposal is a formal engagement document.
+vars:
+  contact_id: "00000000-0000-0000-0000-000000000002"
+  lead_stage: "booked"
+  lead_score: "95"
+  lead_notes: |
+    Confirmed 3-day executive communication programme for HDFC Bank, 40 participants.
+    Start date: July 14 2026. Venue: HDFC training centre, Pune.
+    Raj Mehta (VP HR) is the signatory. Budget approved at INR 5,50,000.
+    Custom content requested: stakeholder communication, boardroom presence, crisis comms.
+  meeting_at: "2026-06-05T14:00:00+05:30"
+assert:
+  # Booked leads warrant a more formal, confirmed tone in the call_to_action
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.call_to_action === "string" && o.call_to_action.length >= 15;
+  # Agenda should reflect a 3-day programme (at least 3 sessions)
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return Array.isArray(o.proposed_agenda) && o.proposed_agenda.length >= 3;
+  # proposed_training.duration should mention days
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      const dur = ((o.proposed_training || {}).duration || "").toLowerCase();
+      return dur.includes("day") || dur.includes("session") || dur.includes("hour");
+  # All sessions in proposed_agenda must have session and focus keys
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return (o.proposed_agenda || []).every(
+        s => typeof s.session === "string" && typeof s.focus === "string"
+      );

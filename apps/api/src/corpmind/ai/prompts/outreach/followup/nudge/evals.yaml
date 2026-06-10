@@ -1,0 +1,91 @@
+# Promptfoo eval suite — outreach.followup.nudge
+#
+# Runs in CI on every PR that touches:
+#   - apps/api/src/corpmind/ai/prompts/outreach/followup/nudge/**
+#   - apps/api/src/corpmind/ai/routing.py
+# Merge gate: ≥ 95% pass rate across all fixtures × providers.
+#
+# Local run:
+#   cd apps/api/src/corpmind/ai/prompts/outreach/followup/nudge
+#   EURI_API_KEY=... EURI_API_BASE_URL=https://api.euri.com/v1 \
+#     npx promptfoo eval -c evals.yaml
+
+description: |
+  Validates the outreach.followup.nudge prompt produces a warm, threaded
+  re-engagement that references the original outreach and invents no facts.
+
+prompts:
+  - id: outreach.followup.nudge
+    file: file://load_prompt.py:load
+    label: outreach.followup.nudge v1
+
+# Routing matrix: followup_nudge → [claude-sonnet-4-6, gpt-4.1, claude-haiku-4-5]
+providers:
+  - id: openai:chat:anthropic/claude-sonnet-4-6
+    label: primary
+    config:
+      apiBaseUrl: ${EURI_API_BASE_URL}
+      apiKey: ${EURI_API_KEY}
+      temperature: 0.5
+      max_tokens: 700
+      response_format:
+        type: json_object
+
+  - id: openai:chat:openai/gpt-4.1
+    label: fallback
+    config:
+      apiBaseUrl: ${EURI_API_BASE_URL}
+      apiKey: ${EURI_API_KEY}
+      temperature: 0.5
+      max_tokens: 700
+      response_format:
+        type: json_object
+
+defaultTest:
+  assert:
+    # 1. Output must parse as JSON.
+    - type: is-json
+
+    # 2. Required keys present.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return ["subject", "body", "language_used"].every(k => k in o);
+
+    # 3. Type contract + non-empty body.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return typeof o.subject === "string" && o.subject.trim().length > 0
+          && typeof o.body === "string" && o.body.trim().length > 0
+          && typeof o.language_used === "string";
+
+    # 4. Subject fits the model column bound (≤ 80 chars).
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return o.subject.length <= 80;
+
+    # 5. Threading: subject must reference the original (starts with "Re:").
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return /^re:/i.test(o.subject.trim());
+
+    # 6. Body length is a short nudge (roughly 50–120 words; allow slack).
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        const w = o.body.trim().split(/\s+/).length;
+        return w >= 30 && w <= 160;
+
+tests:
+  - file://fixtures/01_ooo_back_after_break.yaml
+  - file://fixtures/02_sparse_context.yaml
+  - file://fixtures/03_hinglish_reengagement.yaml
+
+sharing: false
+outputPath: ./eval-results.json
+
+defaultThresholds:
+  pass_rate: 0.95

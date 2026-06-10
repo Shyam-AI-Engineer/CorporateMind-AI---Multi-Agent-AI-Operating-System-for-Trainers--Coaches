@@ -371,6 +371,27 @@ class InboxService:
         body_snippet = decrypt(msg.body_snippet_enc) if msg.body_snippet_enc else None
         return _to_message_out(msg, body_snippet)
 
+    async def get_decrypted_snippet(self, message_id: uuid.UUID) -> str | None:
+        """Return ONLY the decrypted body snippet for an inbox message.
+
+        This is the inbox module's single entry point for the follow-up cadence
+        (ADR-0008) to hydrate reply context.  Decryption — and therefore
+        knowledge of the AES key registry — stays inside this module; callers in
+        other modules / workers never touch ciphertext.  Returns None when the
+        message has no stored snippet (body_snippet_enc is NULL).
+
+        Distinct from get_message(), which returns the full InboxMessageOut DTO;
+        the cadence only needs the plaintext reply text, not the whole record.
+
+        Raises:
+            NotFoundError: Message not found for this tenant.
+            DecryptionError: Stored ciphertext is corrupted or uses an unknown key version.
+        """
+        msg = await self._msg_repo.find_by_id(message_id)
+        if msg is None:
+            raise NotFoundError(f"Inbox message {message_id} not found")
+        return decrypt(msg.body_snippet_enc) if msg.body_snippet_enc else None
+
     # ── Classification ─────────────────────────────────────────────────────────
 
     async def update_classification(

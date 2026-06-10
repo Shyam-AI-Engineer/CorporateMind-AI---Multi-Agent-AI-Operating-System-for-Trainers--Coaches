@@ -1,0 +1,29 @@
+description: Standard out-of-office re-engagement — should reference the original note warmly and make one soft ask.
+vars:
+  trainer_niche: "Leadership Development"
+  trainer_topics: "leadership, coaching, first-time managers"
+  trainer_usp: "Cuts promotion-readiness time by six months on average."
+  trainer_bio: "10 years designing accelerated leadership programs for BFSI HRBP teams."
+  trainer_pricing: "₹50,000 – ₹150,000"
+  trainer_tone: "semi_formal"
+  trainer_industries: "Insurance, BFSI"
+  contact_name: "Priya Sharma"
+  contact_title: "VP-HR"
+  contact_company: "HDFC Life Insurance"
+  contact_industry: "Insurance"
+  contact_language: "en"
+  original_subject: "Building HDFC Life's next leadership bench"
+  original_body: "Hi Priya, I help HR teams accelerate promotion-readiness for senior cohorts. Would 15 minutes make sense?"
+  days_since: "14"
+  lead_stage: "engaged"
+assert:
+  # Should acknowledge the absence lightly (away / back / break / out of office).
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return /(away|back|break|out of office|out-of-office|holiday|leave)/i.test(o.body);
+  # Must not invent a price figure in the body.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return !/(₹|rs\.?|inr)\s*\d/i.test(o.body);

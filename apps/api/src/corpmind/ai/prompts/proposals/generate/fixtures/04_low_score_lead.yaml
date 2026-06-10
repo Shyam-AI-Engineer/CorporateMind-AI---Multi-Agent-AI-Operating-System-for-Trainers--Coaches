@@ -1,0 +1,32 @@
+description: Low-score lead with lukewarm notes — model should produce a complete but cautious proposal.
+vars:
+  contact_id: "00000000-0000-0000-0000-000000000004"
+  lead_stage: "meeting_completed"
+  lead_score: "22"
+  lead_notes: |
+    Call with Ananya Reddy, HR Manager at a 200-person IT services firm in Hyderabad.
+    She was politely interested but said the training budget is tight this quarter.
+    No commitment given. Team size unclear — asked a follow-up email.
+    May revisit in Q4. Cool temperature.
+  meeting_at: "2026-06-10T11:00:00+05:30"
+assert:
+  # investment field must exist and be non-empty (even if "TBD" or flexible framing)
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.investment === "string" && o.investment.trim().length > 0;
+  # call_to_action should exist — a soft CTA for a cool lead is still required
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.call_to_action === "string" && o.call_to_action.trim().length >= 10;
+  # title must be present
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.title === "string" && o.title.trim().length > 0;
+  # executive_summary must be present — framing the business case is always needed
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return typeof o.executive_summary === "string" && o.executive_summary.length > 0;

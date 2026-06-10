@@ -1,0 +1,29 @@
+description: Scope question that IS answerable from the trainer profile — model should answer and NOT defer.
+vars:
+  trainer_niche: "Leadership Development"
+  trainer_topics: "leadership, coaching, first-time managers"
+  trainer_usp: "Cuts promotion-readiness time by six months on average."
+  trainer_bio: "10 years designing accelerated leadership programs for BFSI HRBP teams."
+  trainer_pricing: "₹50,000 – ₹150,000"
+  trainer_tone: "semi_formal"
+  trainer_industries: "Insurance, BFSI"
+  contact_name: "Priya Sharma"
+  contact_title: "VP-HR"
+  contact_company: "HDFC Life Insurance"
+  contact_industry: "Insurance"
+  contact_language: "en"
+  original_subject: "Building HDFC Life's next leadership bench"
+  original_body: "Hi Priya, I help HR teams accelerate promotion-readiness for senior cohorts. Would 15 minutes make sense?"
+  reply_text: "Thanks for reaching out. Do you specifically cover the first-time-manager transition, or only senior leadership?"
+  lead_stage: "engaged"
+assert:
+  # The profile lists "first-time managers" as a topic, so the model should answer.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return o.answered === true && o.needs_human_review === false;
+  # Body should be substantive (the question is answerable).
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return o.body.trim().split(/\s+/).length >= 40;

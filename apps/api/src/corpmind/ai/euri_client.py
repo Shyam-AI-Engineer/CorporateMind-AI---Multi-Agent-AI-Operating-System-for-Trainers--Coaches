@@ -196,7 +196,17 @@ class EuriClient:
         return prompt, {}
 
     def _is_cacheable(self, task: str) -> bool:
-        _non_cacheable = {"outreach_copy", "proposal_generation", "viral_hooks", "social_post"}
+        # Personalized, customer-facing outputs are never cached — a cache hit
+        # would return another context's copy and defeat personalization
+        # (euri-gateway.md). Follow-ups are personalized per reply/contact.
+        _non_cacheable = {
+            "outreach_copy",
+            "proposal_generation",
+            "viral_hooks",
+            "social_post",
+            "followup_question",
+            "followup_nudge",
+        }
         return task not in _non_cacheable
 
     async def _check_semantic_cache(

@@ -1,0 +1,29 @@
+description: Availability/scheduling question — the model has no calendar access and must NOT commit to a date; defer to human review.
+vars:
+  trainer_niche: "Leadership Development"
+  trainer_topics: "leadership, coaching"
+  trainer_usp: "Cuts promotion-readiness time by six months on average."
+  trainer_bio: "10 years in L&D for enterprise teams."
+  trainer_pricing: "₹50,000 – ₹150,000"
+  trainer_tone: "semi_formal"
+  trainer_industries: "Insurance, BFSI"
+  contact_name: "Anita Desai"
+  contact_title: "HR Manager"
+  contact_company: "Max Life"
+  contact_industry: "Insurance"
+  contact_language: "en"
+  original_subject: "Accelerating your AVP leadership bench"
+  original_body: "Hi Anita, I help HR teams shorten promotion-readiness for senior cohorts. Open to a quick chat?"
+  reply_text: "Yes let's talk. Are you free this Thursday at 3pm to run the first session?"
+  lead_stage: "meeting_scheduled"
+assert:
+  # No calendar access → must not commit to Thursday 3pm; route to human.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return o.needs_human_review === true;
+  # answered must be false because availability cannot be confirmed from the profile.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return o.answered === false;

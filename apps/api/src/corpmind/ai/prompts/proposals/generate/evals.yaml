@@ -1,0 +1,124 @@
+# Promptfoo eval suite — proposals.generate
+#
+# Runs in CI on every PR that touches:
+#   - apps/api/src/corpmind/ai/prompts/proposals/generate/**
+#   - apps/api/src/corpmind/ai/routing.py
+# Merge gate: ≥ 95% pass rate across all fixtures × providers.
+#
+# Local run:
+#   cd apps/api/src/corpmind/ai/prompts/proposals/generate
+#   EURI_API_KEY=... EURI_API_BASE_URL=https://api.euri.com/v1 \
+#     npx promptfoo eval -c evals.yaml
+#
+# Why we use the openai provider against Euri: the gateway is OpenAI-compatible,
+# and this keeps the eval honest — it hits the same egress path as prod.
+
+description: |
+  Validates the proposals.generate prompt produces schema-valid, complete
+  proposal documents across high-score, booked, empty-notes, and low-score
+  scenarios.
+
+prompts:
+  - id: proposals.generate
+    file: file://load_prompt.py:load
+    label: proposals.generate v1
+
+# Exercise both rungs of the routing chain so fallback quality is gated too.
+# Routing matrix: proposal_generation → [claude-sonnet-4-6, gpt-4o] (premium tier)
+providers:
+  - id: openai:chat:anthropic/claude-sonnet-4-6
+    label: primary
+    config:
+      apiBaseUrl: ${EURI_API_BASE_URL}
+      apiKey: ${EURI_API_KEY}
+      temperature: 0.4
+      max_tokens: 1500
+      response_format:
+        type: json_object
+
+  - id: openai:chat:openai/gpt-4o
+    label: fallback
+    config:
+      apiBaseUrl: ${EURI_API_BASE_URL}
+      apiKey: ${EURI_API_KEY}
+      temperature: 0.4
+      max_tokens: 1500
+      response_format:
+        type: json_object
+
+# Assertions applied to EVERY test, on top of per-fixture assertions.
+defaultTest:
+  assert:
+    # 1. Output must parse as JSON.
+    - type: is-json
+
+    # 2. All required top-level keys present.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        const required = [
+          "title",
+          "executive_summary",
+          "proposed_training",
+          "value_proposition",
+          "proposed_agenda",
+          "investment",
+          "call_to_action"
+        ];
+        return required.every(k => k in o);
+
+    # 3. Type contract: strings where strings are required.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return typeof o.title === "string" && o.title.trim().length > 0
+          && typeof o.executive_summary === "string"
+          && typeof o.investment === "string"
+          && typeof o.call_to_action === "string";
+
+    # 4. value_proposition is an array with at least 3 string items.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return Array.isArray(o.value_proposition)
+          && o.value_proposition.length >= 3
+          && o.value_proposition.every(x => typeof x === "string" && x.trim().length > 0);
+
+    # 5. proposed_agenda is an array (may be empty for sparse input) where each
+    #    item has session + focus string keys.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return Array.isArray(o.proposed_agenda)
+          && o.proposed_agenda.every(
+            s => typeof s.session === "string" && typeof s.focus === "string"
+          );
+
+    # 6. proposed_training is an object with topic, duration, format, participants.
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        const pt = o.proposed_training || {};
+        const allowed_formats = ["in-person", "virtual", "hybrid"];
+        return typeof pt.topic === "string" && pt.topic.length > 0
+          && typeof pt.duration === "string"
+          && allowed_formats.includes(pt.format)
+          && typeof pt.participants === "string";
+
+    # 7. title must be under 200 characters (fits in the model column).
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return o.title.length <= 200;
+
+tests:
+  - file://fixtures/01_meeting_completed_high_score.yaml
+  - file://fixtures/02_booked_stage.yaml
+  - file://fixtures/03_empty_notes_fallback.yaml
+  - file://fixtures/04_low_score_lead.yaml
+
+sharing: false
+outputPath: ./eval-results.json
+
+defaultThresholds:
+  pass_rate: 0.95

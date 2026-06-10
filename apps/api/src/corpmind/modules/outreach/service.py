@@ -40,6 +40,8 @@ from corpmind.modules.compliance.service import ComplianceService
 from corpmind.modules.outreach.models import OutboundMessage
 from corpmind.modules.outreach.repo import OutboundMessageRepo
 from corpmind.modules.outreach.schemas import (
+    FollowupDraftOut,
+    GenerateFollowupRequest,
     GenerateOutreachRequest,
     OutboundMessageListOut,
     OutboundMessageOut,
@@ -49,6 +51,13 @@ from corpmind.modules.outreach.schemas import (
 log = structlog.get_logger(__name__)
 
 _SUPPORTED_CHANNELS = frozenset({"email"})
+
+# Follow-up task type → (routing task class, prompt name). Premium tier; see
+# ADR-0008 §4 and routing.py.  Both prompts are non-cacheable (euri-gateway.md).
+_FOLLOWUP_ROUTING: dict[str, tuple[str, str]] = {
+    "question_followup": ("followup_question", "outreach.followup.question"),
+    "out_of_office_followup": ("followup_nudge", "outreach.followup.nudge"),
+}
 
 
 class OutreachService:
@@ -116,6 +125,87 @@ class OutreachService:
             channel=req.channel,
         )
         return OutboundMessageOut.model_validate(msg)
+
+    async def generate_followup(self, req: GenerateFollowupRequest) -> FollowupDraftOut:
+        """Generate a context-aware follow-up draft (ADR-0008, Sprint 8A).
+
+        Mirrors the structure of generate_message() but selects a follow-up
+        prompt by task type and surfaces a HITL signal on the return DTO.  The
+        cold-outreach path (generate_message / _parse_copy) is deliberately left
+        untouched — this is a sibling method, not a branch through the cold flow.
+
+        Sprint 8A is GENERATION ONLY: this persists a draft OutboundMessage and
+        returns it.  It does NOT send, transition status, schedule, or enqueue
+        anything — that is Sprint 8B.  ComplianceGuard still runs in full at send
+        time; here we only fail-fast on opt-in to avoid spending premium AI
+        budget on a contact that would be blocked anyway (same as generate_message).
+
+        needs_human_review is returned, never stored — keeping 8A migration-free.
+        For question follow-ups it fails safe to True when the model could not
+        answer from trainer-profile facts.
+        """
+        routing = _FOLLOWUP_ROUTING.get(req.task_type)
+        if routing is None:
+            # Defensive: the schema pattern already constrains task_type, but a
+            # caller using model_construct() could bypass validation.
+            raise ValidationError(f"Unknown follow-up task type '{req.task_type}'")
+        task, prompt_name = routing
+
+        ctx = get_tenant_context()
+
+        contact = await self._fetch_contact(req.contact_id, ctx.org_id)
+        if contact is None:
+            raise NotFoundError(f"Contact {req.contact_id} not found")
+
+        # Fail fast on opt-in before the premium LLM call.
+        comp_req = _build_compliance_req(
+            req.contact_id, "email", req.campaign_id, contact, ctx.org_id
+        )
+        opt_in = await self._compliance.check_opt_in(comp_req)
+        if opt_in.outcome == ComplianceOutcome.BLOCKED:
+            raise OptInRequiredError(
+                opt_in.reason or "Contact has not opted in for outreach."
+            )
+
+        trainer = await self._fetch_trainer_profile(ctx.workspace_id, ctx.org_id)
+
+        result = await self._llm.chat(
+            task=task,
+            prompt_name=prompt_name,
+            prompt_inputs=_build_followup_inputs(req, contact, trainer),
+            tenant_id=ctx.org_id,
+            request_id=ctx.request_id,
+            agent="outreach_followup_service",
+        )
+        parsed = self._parse_followup(result["content"], req.task_type)
+
+        msg = OutboundMessage(
+            tenant_id=ctx.org_id,
+            campaign_id=req.campaign_id,
+            contact_id=req.contact_id,
+            channel="email",
+            subject=parsed["subject"],
+            body=parsed["body"],
+            prompt_version=f"{prompt_name}.v1",
+            ab_variant=None,
+            status="draft",
+        )
+        await self._repo.create(msg)
+        await self._session.commit()
+        log.info(
+            "outreach.followup_draft_created",
+            message_id=str(msg.id),
+            contact_id=str(req.contact_id),
+            task_type=req.task_type,
+            needs_human_review=parsed["needs_human_review"],
+            answered=parsed["answered"],
+        )
+        return FollowupDraftOut(
+            message=OutboundMessageOut.model_validate(msg),
+            task_type=req.task_type,
+            needs_human_review=parsed["needs_human_review"],
+            answered=parsed["answered"],
+        )
 
     async def send_message(self, message_id: uuid.UUID) -> SendMessageResponse:
         """Run full compliance gate and enqueue the Celery send task.
@@ -248,6 +338,58 @@ class OutreachService:
             raise ValidationError("Outreach copy missing required 'body' field")
         return data
 
+    def _parse_followup(self, raw: str, task_type: str) -> dict:
+        """Parse a follow-up LLM response into {subject, body, needs_human_review, answered}.
+
+        Self-contained on purpose — it does NOT reuse _parse_copy so the cold
+        outreach parser stays byte-identical.  JSON-fence stripping mirrors
+        _parse_copy.  Behaviour differs by task type:
+
+          out_of_office_followup (nudge): requires a non-empty body; never needs
+            review; answered is None (no question to answer).
+
+          question_followup: fails safe.  needs_human_review defaults to True when
+            the flag is missing/unparseable, and is forced True whenever the model
+            reports answered=false (could not answer from profile facts) — this is
+            the correctness-over-speed gate from ADR-0008 §5.  An empty body is
+            tolerated (the human will write the answer) but still routes to review.
+        """
+        stripped = raw.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.strip("`")
+            if stripped.startswith("json"):
+                stripped = stripped[4:].lstrip()
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise ValidationError(f"Follow-up copy returned non-JSON: {exc}") from exc
+
+        subject = data.get("subject") or ""
+        body = data.get("body")
+
+        if task_type == "out_of_office_followup":
+            if not body:
+                raise ValidationError("Nudge follow-up missing required 'body' field")
+            return {
+                "subject": subject,
+                "body": body,
+                "needs_human_review": False,
+                "answered": None,
+            }
+
+        # question_followup — fail-safe to human review.
+        answered = bool(data.get("answered", False))
+        review_raw = data.get("needs_human_review")
+        needs_review = True if review_raw is None else bool(review_raw)
+        if not answered:
+            needs_review = True
+        return {
+            "subject": subject,
+            "body": body if body is not None else "",
+            "needs_human_review": needs_review,
+            "answered": answered,
+        }
+
 
 # ── Module-level helpers ───────────────────────────────────────────────────────
 
@@ -308,3 +450,29 @@ def _build_prompt_inputs(contact: dict, trainer: dict) -> dict:
         "contact_industry": contact.get("industry") or "",
         "contact_language": contact.get("preferred_language") or "en",
     }
+
+
+def _build_followup_inputs(
+    req: GenerateFollowupRequest, contact: dict, trainer: dict
+) -> dict:
+    """Build prompt inputs for a follow-up: the trainer/contact block plus the
+    reply/original-email context.
+
+    Reuses _build_prompt_inputs for the trainer/contact fields (so the two paths
+    can never drift on profile rendering), then adds follow-up-specific keys.
+    Every key the followup prompts reference MUST be present here — the registry
+    uses str.format_map and sends the prompt UNRENDERED if a key is missing.
+    Optional context falls back to explicit placeholders so the model is told the
+    field is unavailable rather than seeing a literal "{original_body}".
+    """
+    inputs = _build_prompt_inputs(contact, trainer)
+    inputs.update(
+        {
+            "reply_text": req.reply_text or "(no reply text available)",
+            "original_subject": req.original_subject or "(original subject unavailable)",
+            "original_body": req.original_body or "(original email body unavailable)",
+            "lead_stage": req.lead_stage or "unknown",
+            "days_since": str(req.days_since) if req.days_since is not None else "a few",
+        }
+    )
+    return inputs

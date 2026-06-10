@@ -1,0 +1,29 @@
+description: Specific pricing question the profile cannot firmly answer — model must NOT invent a number and must defer to human review.
+vars:
+  trainer_niche: "Sales Enablement"
+  trainer_topics: "consultative selling, negotiation, frontline coaching"
+  trainer_usp: "Lifted quarterly conversion rates by 20% for retail frontline teams."
+  trainer_bio: "Worked with frontline managers at large Indian retail chains."
+  trainer_pricing: "on request"
+  trainer_tone: "conversational"
+  trainer_industries: "Retail, FMCG"
+  contact_name: "Vikram Rao"
+  contact_title: "L&D Head"
+  contact_company: "Reliance Retail"
+  contact_industry: "Retail"
+  contact_language: "en"
+  original_subject: "Reimagining frontline sales training"
+  original_body: "Hi Vikram, I help retail teams turn floor reality into measurable conversion gains. Worth a quick chat?"
+  reply_text: "Interesting. What would a 2-day programme for 25 people cost us, all-in?"
+  lead_stage: "engaged"
+assert:
+  # Pricing is "on request" in the profile — the model must defer, not invent a figure.
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return o.needs_human_review === true;
+  # Body must not state an invented rupee amount (no ₹/Rs/INR figure fabricated).
+  - type: javascript
+    value: |
+      const o = JSON.parse(output);
+      return !/(₹|rs\.?|inr)\s*\d/i.test(o.body);

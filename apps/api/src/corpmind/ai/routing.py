@@ -26,6 +26,10 @@ _ROUTING_MATRIX: dict[str, list[str]] = {
     "viral_hooks":          ["claude-sonnet-4-6", "gpt-4.1"],
     "social_post":          ["claude-sonnet-4-6", "gpt-4.1-mini"],
     "trainer_extraction":   ["claude-sonnet-4-6", "gpt-4.1-mini"],
+    # Reply follow-ups (premium) — answering an HR contact's question or writing
+    # a re-engagement is customer-facing and reputation-critical (ADR-0008 §4).
+    "followup_question":    ["claude-sonnet-4-6", "gpt-4.1", "claude-haiku-4-5"],
+    "followup_nudge":       ["claude-sonnet-4-6", "gpt-4.1", "claude-haiku-4-5"],
 
     # ── Planning (premium) ────────────────────────────────────────────────────
     "root_planning":        ["claude-opus-4-7", "claude-sonnet-4-6"],
