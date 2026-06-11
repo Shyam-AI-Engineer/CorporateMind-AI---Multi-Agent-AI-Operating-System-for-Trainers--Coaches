@@ -132,6 +132,36 @@ class ComplianceService:
             )
         return ComplianceCheckResult(outcome=ComplianceOutcome.ALLOWED)
 
+    async def record_audit_event(
+        self,
+        *,
+        event_type: str,
+        outcome: str,
+        reason: str | None = None,
+        content_hash: str | None = None,
+        event_data: dict | None = None,
+    ) -> None:
+        """Append an audit_events row for a privileged action.
+
+        The public entry point other modules use to write audit records without
+        importing this module's repo/models (cross-module boundary rule).  Used
+        by the Sprint 8C follow-up approval flow (followup.approved / .rejected /
+        .edited / .blocked_on_approve).  actor is the current user from context.
+        """
+        ctx = get_tenant_context()
+        await self._audit.append(
+            AuditEvent(
+                tenant_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                actor_type="user",
+                event_type=event_type,
+                outcome=outcome,
+                reason=reason,
+                content_hash=content_hash,
+                event_data=event_data or {},
+            )
+        )
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _write_block_audit(

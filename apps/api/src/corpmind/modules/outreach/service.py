@@ -284,6 +284,30 @@ class OutreachService:
             raise NotFoundError(f"Message {message_id} not found")
         return OutboundMessageOut.model_validate(msg)
 
+    async def update_draft_content(
+        self, message_id: uuid.UUID, *, subject: str | None, body: str
+    ) -> OutboundMessageOut:
+        """Edit a draft's subject/body (Sprint 8C HITL — ADR-0008 §C).
+
+        Only a message still in 'draft' status may be edited; once it is queued
+        or sent the content is frozen.  Used by the follow-up approval flow so a
+        trainer can refine the AI-drafted answer before approving the send.
+        """
+        msg = await self._repo.find_by_id(message_id)
+        if msg is None:
+            raise NotFoundError(f"Message {message_id} not found")
+        if msg.status != "draft":
+            raise ConflictError(
+                f"Cannot edit a message in status '{msg.status}'; only drafts are editable."
+            )
+        msg.subject = subject
+        msg.body = body
+        response = OutboundMessageOut.model_validate(msg)
+        await self._repo.update_content(message_id, subject=subject, body=body)
+        await self._session.commit()
+        log.info("outreach.draft_edited", message_id=str(message_id))
+        return response
+
     async def list_messages_by_campaign(
         self,
         campaign_id: uuid.UUID,

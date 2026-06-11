@@ -9,9 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.database import get_session
 from corpmind.core.exceptions import ValidationError
+from corpmind.modules.crm.approval import FollowUpApprovalService
 from corpmind.modules.crm.schemas import (
     ActivityListOut,
+    FollowupApproveResponse,
+    FollowupDraftView,
+    FollowupEditRequest,
+    FollowupRejectRequest,
+    FollowupReviewOut,
     FollowUpTaskListOut,
+    FollowUpTaskOut,
     LeadCreate,
     LeadListOut,
     LeadNoteUpdate,
@@ -124,6 +131,60 @@ async def list_follow_ups(
         limit=limit,
         offset=offset,
     )
+
+
+# ── Follow-up HITL approval (Sprint 8C) ───────────────────────────────────────
+
+@router.get(
+    "/follow-ups/{task_id}/review",
+    response_model=FollowupReviewOut,
+    summary="Review payload for an awaiting_approval follow-up (reply + draft + context)",
+)
+async def review_follow_up(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> FollowupReviewOut:
+    return await FollowUpApprovalService(session).get_review(task_id)
+
+
+@router.patch(
+    "/follow-ups/{task_id}/draft",
+    response_model=FollowupDraftView,
+    summary="Edit the draft of an awaiting_approval follow-up before sending",
+)
+async def edit_follow_up_draft(
+    task_id: uuid.UUID,
+    req: FollowupEditRequest,
+    session: AsyncSession = Depends(get_session),
+) -> FollowupDraftView:
+    return await FollowUpApprovalService(session).edit_draft(
+        task_id, subject=req.subject, body=req.body
+    )
+
+
+@router.post(
+    "/follow-ups/{task_id}/approve",
+    response_model=FollowupApproveResponse,
+    summary="Approve and send a follow-up draft (runs full ComplianceGuard)",
+)
+async def approve_follow_up(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> FollowupApproveResponse:
+    return await FollowUpApprovalService(session).approve(task_id)
+
+
+@router.post(
+    "/follow-ups/{task_id}/reject",
+    response_model=FollowUpTaskOut,
+    summary="Reject a follow-up draft (cancels the task; nothing is sent)",
+)
+async def reject_follow_up(
+    task_id: uuid.UUID,
+    req: FollowupRejectRequest = FollowupRejectRequest(),
+    session: AsyncSession = Depends(get_session),
+) -> FollowUpTaskOut:
+    return await FollowUpApprovalService(session).reject(task_id, reason=req.reason)
 
 
 @router.get(

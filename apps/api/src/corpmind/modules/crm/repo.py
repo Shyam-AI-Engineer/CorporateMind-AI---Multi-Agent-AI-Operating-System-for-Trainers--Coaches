@@ -235,6 +235,17 @@ class FollowUpTaskRepo:
         await self._session.flush()
         return task
 
+    async def find_by_id(self, task_id: uuid.UUID) -> FollowUpTask | None:
+        """Tenant-scoped fetch by primary key — used by the 8C approval surface."""
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(FollowUpTask).where(
+                FollowUpTask.id == task_id,
+                FollowUpTask.tenant_id == ctx.org_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def find_by_inbox_message(
         self, inbox_message_id: uuid.UUID
     ) -> FollowUpTask | None:

@@ -114,6 +114,10 @@ class FollowUpTaskOut(BaseModel):
     scheduled_for: datetime | None
     source_inbox_message_id: uuid.UUID
     source_outbound_message_id: uuid.UUID | None
+    # Sprint 8B/8C: the draft this follow-up produced (set when parked/sent).
+    # Surfaced so the approval UI can locate the draft to review.
+    result_outbound_message_id: uuid.UUID | None = None
+    attempts: int = 0
     notes: str | None
     created_at: datetime
     updated_at: datetime
@@ -126,3 +130,54 @@ class FollowUpTaskListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ── Sprint 8C: HITL approval surface for awaiting_approval follow-ups ──────────
+
+class FollowupDraftView(BaseModel):
+    """The draft outbound message a follow-up produced, for human review."""
+
+    id: uuid.UUID
+    subject: str | None
+    body: str
+    status: str
+
+
+class FollowupReplyView(BaseModel):
+    """The inbound reply that triggered the follow-up (decrypted snippet).
+
+    Counterparty content within the tenant boundary — returned only in an
+    authenticated, tenant-scoped response and never written to logs.
+    """
+
+    from_address: str | None
+    subject: str | None
+    snippet: str | None
+    received_at: datetime | None
+
+
+class FollowupReviewOut(BaseModel):
+    """Consolidated review payload: reply ↔ draft + context, one round trip."""
+
+    task: FollowUpTaskOut
+    draft: FollowupDraftView | None
+    reply: FollowupReplyView | None
+    original_subject: str | None
+    lead_stage: str | None
+
+
+class FollowupEditRequest(BaseModel):
+    """Edit the draft body/subject before approval (only while awaiting_approval)."""
+
+    subject: str | None = None
+    body: str = Field(min_length=1)
+
+
+class FollowupRejectRequest(BaseModel):
+    reason: str | None = None
+
+
+class FollowupApproveResponse(BaseModel):
+    task_id: uuid.UUID
+    status: str  # done | blocked
+    compliance_reason: str | None = None

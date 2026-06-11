@@ -100,6 +100,28 @@ class OutboundMessageRepo:
             .values(smtp_message_id=smtp_message_id)
         )
 
+    async def update_content(
+        self,
+        message_id: uuid.UUID,
+        *,
+        subject: str | None,
+        body: str,
+    ) -> None:
+        """Update draft subject/body (Sprint 8C HITL edit).
+
+        Tenant-scoped; the service guards that the message is still a draft before
+        calling.  Does NOT commit — caller commits.
+        """
+        ctx = get_tenant_context()
+        await self._session.execute(
+            update(OutboundMessage)
+            .where(
+                OutboundMessage.id == message_id,
+                OutboundMessage.tenant_id == ctx.org_id,
+            )
+            .values(subject=subject, body=body)
+        )
+
     async def update_status(
         self,
         message_id: uuid.UUID,

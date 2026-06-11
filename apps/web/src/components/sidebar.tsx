@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ApprovalCountBadge } from "@/features/crm/ui/approval-count-badge";
 
 interface NavItem {
   href: string;
@@ -91,7 +92,8 @@ export function Sidebar({ userEmail }: SidebarProps) {
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              {label}
+              <span className="flex-1">{label}</span>
+              {href === "/crm" && <ApprovalCountBadge />}
             </Link>
           );
         })}

@@ -88,6 +88,8 @@ export interface FollowUpTask {
   scheduled_for: string | null;
   source_inbox_message_id: string;
   source_outbound_message_id: string | null;
+  result_outbound_message_id: string | null;
+  attempts: number;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -98,6 +100,36 @@ export interface FollowUpListOut {
   total: number;
   limit: number;
   offset: number;
+}
+
+// ── Sprint 8C: follow-up HITL approval ──────────────────────────────────────
+
+export interface FollowupDraftView {
+  id: string;
+  subject: string | null;
+  body: string;
+  status: string;
+}
+
+export interface FollowupReplyView {
+  from_address: string | null;
+  subject: string | null;
+  snippet: string | null;
+  received_at: string | null;
+}
+
+export interface FollowupReview {
+  task: FollowUpTask;
+  draft: FollowupDraftView | null;
+  reply: FollowupReplyView | null;
+  original_subject: string | null;
+  lead_stage: string | null;
+}
+
+export interface FollowupApproveResponse {
+  task_id: string;
+  status: string; // "done" | "blocked"
+  compliance_reason: string | null;
 }
 
 // Activity type vocabulary — mirrors crm/automation.py constants.
@@ -114,15 +146,19 @@ export const ACTIVITY_CONFIG: Record<
   unknown_intent_logged:    { label: "Reply received",      icon: "mail" },
   automation_failed:        { label: "Automation failed",   icon: "alert-triangle" },
   automation_skipped:       { label: "Automation skipped",  icon: "alert-triangle" },
+  followup_approved:        { label: "Follow-up approved",  icon: "mail" },
+  followup_rejected:        { label: "Follow-up rejected",  icon: "mail-x" },
 };
 
 export const FOLLOW_UP_STATUS_CONFIG: Record<
   string,
   { label: string; variant: "warning" | "success" | "secondary" | "outline" }
 > = {
-  pending:   { label: "Pending",   variant: "warning" },
-  done:      { label: "Done",      variant: "success" },
-  cancelled: { label: "Cancelled", variant: "secondary" },
+  pending:           { label: "Pending",      variant: "warning" },
+  awaiting_approval: { label: "Needs review", variant: "warning" },
+  processing:        { label: "Processing",   variant: "outline" },
+  done:              { label: "Done",         variant: "success" },
+  cancelled:         { label: "Cancelled",    variant: "secondary" },
 };
 
 
