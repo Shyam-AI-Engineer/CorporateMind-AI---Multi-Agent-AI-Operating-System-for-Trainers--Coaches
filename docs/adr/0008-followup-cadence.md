@@ -249,7 +249,7 @@ Per `automation.md`: no outbound to a recipient outside their local **08:00–21
 
 The cadence enforces quiet hours at **claim time**, before generation:
 
-1. Resolve the recipient's local timezone. Phase 1 source order: contact's company HQ region → workspace `Org.timezone` → `Asia/Kolkata` default. (Per-contact timezone is a Phase 2 enrichment.)
+1. Resolve the recipient's local timezone. **Phase 1 source: `Workspace.timezone`** ([identity/models.py:43](../../apps/api/src/corpmind/modules/identity/models.py#L43) — `String(64)`, NOT NULL, default `Asia/Kolkata`), keyed by `follow_up_tasks.workspace_id`. `workspaces` is RLS-exempt so the worker reads it without GUC gymnastics. Fallback to `Asia/Kolkata` is effectively unreachable (column is NOT NULL with a default). (Verified correction — `Org.timezone` does **not** exist; per-contact timezone remains a Phase 2 enrichment.)
 2. If the current local time is inside 08:00–21:00 → proceed.
 3. If outside → **re-stamp** `scheduled_for` to the next local 08:00 and return the task to `pending` (no send, no wasted LLM spend). The next beat picks it up in-window.
 
@@ -295,21 +295,37 @@ This is a backward-compatible adapter enhancement: cold sends (no threading anch
 
 The cadence runs cross-tenant on a schedule; overlapping beats and per-tenant fan-out mean the same `pending` row could be picked up twice. Claiming must be atomic.
 
-### Two-tier fan-out (mirrors `inbox.sync_all_active_connections`)
+### Two-tier fan-out (sweep over `orgs`, not a BYPASSRLS scan)
+
+> **Amended 2026-06-11 (Sprint 8B readiness):** The original design did a BYPASSRLS
+> `SELECT DISTINCT tenant_id FROM follow_up_tasks`. Verification found the RLS
+> migration uses `FORCE ROW LEVEL SECURITY`, so the app role does **not** bypass
+> RLS, and **no `BYPASSRLS` role is provisioned in-repo** (only an inbox-fan-out
+> docstring naming a non-existent role — see the separate defect note
+> `ops/defects/inbox-fanout-rls-dependency.md`). Rather than grant the app role a
+> bypass capability that would weaken the P0 tenant-isolation invariant, the sweep
+> instead fans out over `orgs` — which is **RLS-exempt** ([f5a3c8d92e1b:31](../../apps/api/migrations/versions/f5a3c8d92e1b_enable_rls_tenant_isolation.py#L31))
+> and therefore readable with no GUC. Each per-tenant subtask runs RLS-scoped and
+> self-skips when it has no due tasks. **No BYPASSRLS dependency.**
 
 ```
-advance_followup_cadence            [beat, every 30 min, BYPASSRLS role]
-  │  sweep: SELECT DISTINCT tenant_id
-  │         FROM follow_up_tasks
-  │         WHERE status = 'pending'
-  │           AND (scheduled_for IS NULL OR scheduled_for <= now())
+advance_followup_cadence            [beat, every 30 min — reads RLS-exempt orgs]
+  │  sweep: SELECT id, created_at FROM orgs WHERE is_active = true
+  │         (orgs has no RLS policy → no app.tenant_id needed)
   │
-  └─► process_tenant_followups.apply_async(tenant_id)   [one subtask per tenant]
-        │  set_tenant_context(ctx) + set_rls_tenant(tenant_id)
+  └─► process_tenant_followups.apply_async(tenant_id)   [one subtask per active org]
+        │  set_tenant_context(ctx) + set_rls_tenant(tenant_id)   ← RLS now enforced
+        │  list_due(LIMIT 50)  → if empty, return immediately (cheap self-skip)
         │  batch cap: LIMIT 50 per tenant per run  (noisy-neighbour guard)
         │
         └─ for each due task:  ATOMIC CLAIM
 ```
+
+Trade-off: a subtask is enqueued per *active org* every 30 min even when an org has
+no due tasks (a single `LIMIT 1`-style check then exit). Negligible at Stage-1 tenant
+counts; a Phase-2 optimization can skip orgs with no recent follow-up activity via a
+lightweight marker. `Org.created_at` (read in the same sweep row) doubles as the
+training-wheels signal (§5 / HITL).
 
 ### Atomic claim (DB-level)
 
@@ -416,7 +432,7 @@ No original email to thread into or quote. **Mitigation:** fall back to a non-th
 **Mitigation:** atomic DB claim (§8) is authoritative; `followup:processing` Redis NX lock (§9) covers the generate→enqueue race; `outreach:sent` lock covers the network send. Three layers.
 
 ### 7. Quiet-hours timezone unknown
-**Mitigation:** fallback chain HQ region → `Org.timezone` → `Asia/Kolkata`. Worst case a send lands in IST business hours, which is the dominant tenant base.
+**Mitigation:** `Workspace.timezone` (NOT NULL, default `Asia/Kolkata`) → `Asia/Kolkata` fallback. Worst case a send lands in IST business hours, which is the dominant tenant base.
 
 ### 8. Tenant exceeds AI budget mid-cadence
 **Behaviour:** `EuriClient` raises `BudgetExceededError` during `generate_followup`; the task returns to `pending` (not cancelled — budget resets next period). Surfaced via the existing budget banner. Non-critical workflows refuse to start at 100% per `ai-cost-governance.md`.
@@ -458,11 +474,11 @@ Every increment ships behind a kill-switch flag and is reversible without data l
 ```
 Beat            CadenceSweep        TenantSubtask      OutreachSvc     Compliance    SMTP      DB
  │ every 30m       │                    │                 │              │           │        │
- │────────────────►│ SELECT DISTINCT    │                 │              │           │        │
- │                 │ tenant_id (due)    │                 │              │           │        │
+ │────────────────►│ SELECT id FROM     │                 │              │           │        │
+ │                 │ orgs WHERE active  │  (RLS-exempt)    │              │           │        │
  │                 │───────────────────────────────────────────────────────────────────────►│
  │                 │◄───────────────────────────────────────────────────────────────────────│
- │                 │ fan-out per tenant │                 │              │           │        │
+ │                 │ fan-out per org    │                 │              │           │        │
  │                 │───────────────────►│ set RLS + ctx   │              │           │        │
  │                 │                    │ claim (UPDATE…RETURNING)        │           │        │
  │                 │                    │───────────────────────────────────────────────────►│
@@ -558,7 +574,7 @@ Each phase is independently shippable, flag-gated, and leaves the system in a co
 **Goal:** close the loop for the safe, low-touch path; park the rest.
 
 - Expand migration: `status` vocabulary (`processing`, `awaiting_approval`), `result_outbound_message_id`, `attempts` (additive, reversible — ADR-0006).
-- `FollowUpTaskRepo.list_due(limit)` (RLS-scoped) + BYPASSRLS distinct-tenant sweep helper.
+- `FollowUpTaskRepo.list_due(limit)` (RLS-scoped) + an `orgs`-fanout sweep (RLS-exempt read; no BYPASSRLS). See §8 amendment.
 - Implement `advance_followup_cadence` (sweep + fan-out) and `process_tenant_followups(tenant_id)` (claim → quiet-hours → hydrate → generate → eligibility → send/park → transition).
 - Atomic DB claim (§8) + `followup:processing` Redis NX lock (§9).
 - Quiet-hours enforcement (§6) with the timezone fallback chain.

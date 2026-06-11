@@ -113,6 +113,17 @@ class EmailSMTPAdapter:
             mime["Message-ID"] = smtp_message_id
         else:
             mime["Message-ID"] = f"<{msg.message_id}@{settings.MAIL_DOMAIN}>"
+        # Threading (Sprint 8B / ADR-0008 §7): when this is a follow-up, the
+        # cadence passes the ORIGINAL outbound's smtp_message_id as the threading
+        # anchor.  Setting In-Reply-To + References makes the follow-up land in the
+        # same client-side conversation and improves deliverability.  Cold first
+        # sends pass no anchor, so these headers are simply omitted (unchanged
+        # behaviour).  The "Re:" subject is produced by the follow-up prompt, not
+        # munged here.
+        in_reply_to = msg.metadata.get("in_reply_to")
+        if in_reply_to:
+            mime["In-Reply-To"] = in_reply_to
+            mime["References"] = msg.metadata.get("references") or in_reply_to
         mime.attach(MIMEText(msg.body, "plain", "utf-8"))
         return mime
 

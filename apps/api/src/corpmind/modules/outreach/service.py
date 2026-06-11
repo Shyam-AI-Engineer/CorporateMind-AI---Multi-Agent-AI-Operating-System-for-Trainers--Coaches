@@ -207,12 +207,19 @@ class OutreachService:
             answered=parsed["answered"],
         )
 
-    async def send_message(self, message_id: uuid.UUID) -> SendMessageResponse:
+    async def send_message(
+        self, message_id: uuid.UUID, *, in_reply_to: str | None = None
+    ) -> SendMessageResponse:
         """Run full compliance gate and enqueue the Celery send task.
 
         The Celery task re-runs compliance checks immediately before dispatch —
         conditions (unsubscribe, frequency cap) may change between draft creation
         and the actual send.
+
+        `in_reply_to` (Sprint 8B / ADR-0008 §7): the ORIGINAL outbound's
+        smtp_message_id, supplied by the follow-up cadence so the send threads
+        into the existing conversation (In-Reply-To / References).  Defaults to
+        None — cold first-touch sends pass nothing and are unaffected.
         """
         ctx = get_tenant_context()
         msg = await self._repo.find_by_id(message_id)
@@ -260,9 +267,15 @@ class OutreachService:
                 "tenant_id": str(ctx.org_id),
                 "channel": msg.channel,
                 "request_id": ctx.request_id,
+                "in_reply_to": in_reply_to,
             }
         )
-        log.info("outreach.enqueued", message_id=str(message_id), channel=msg.channel)
+        log.info(
+            "outreach.enqueued",
+            message_id=str(message_id),
+            channel=msg.channel,
+            threaded=in_reply_to is not None,
+        )
         return SendMessageResponse(message_id=message_id, status="queued")
 
     async def get_message(self, message_id: uuid.UUID) -> OutboundMessageOut:

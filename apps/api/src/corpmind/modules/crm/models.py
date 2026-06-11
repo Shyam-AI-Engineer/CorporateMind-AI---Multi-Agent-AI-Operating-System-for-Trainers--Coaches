@@ -84,12 +84,16 @@ class FollowUpTask(TenantBase):
       - scheduled_for IS NULL ⇒ "do as soon as possible" (used for `question`)
       - scheduled_for in the future ⇒ scheduled reminder (used for `out_of_office`)
 
-    `status` lifecycle: pending → done | cancelled.  No scheduler wiring this
-    sprint; a future sprint consumes these rows.
+    `status` lifecycle (Sprint 8B):
+      pending ──claim──► processing ──┬─ done            (auto-sent)
+                                      ├─ awaiting_approval (parked for HITL / 8C)
+                                      └─ cancelled        (blocked / unresolvable)
+      processing ──► pending          (quiet-hours deferral or stuck-row reaper)
 
     Idempotency: UNIQUE(tenant_id, source_inbox_message_id) protects against
     duplicate tasks for the same inbound reply even if the higher-level
-    automation log is bypassed.
+    automation log is bypassed.  The cadence (Sprint 8B) adds send-time
+    idempotency on top via the atomic claim (pending→processing) + a Redis lock.
     """
 
     __tablename__ = "follow_up_tasks"
@@ -123,6 +127,16 @@ class FollowUpTask(TenantBase):
         PgUUID(as_uuid=True), nullable=True
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Sprint 8B (expand migration b1d7c4e9f2a8): the outbound draft this follow-up
+    # produced — set when the cadence generates+sends/parks.  Nullable: a task that
+    # is cancelled before generation never has one.  Links the task to its message
+    # for the Activity Timeline and forensic queries.
+    result_outbound_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), nullable=True
+    )
+    # Number of times the cadence has claimed this task.  Incremented on every
+    # claim; a ceiling guards against a poison row looping forever (→ cancelled).
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

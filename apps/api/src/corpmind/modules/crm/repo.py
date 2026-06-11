@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 import structlog
 from sqlalchemy import func, select, update
@@ -293,6 +294,153 @@ class FollowUpTaskRepo:
             stmt = stmt.where(FollowUpTask.status == status)
         result = await self._session.execute(stmt)
         return result.scalar_one()
+
+    # ── Cadence support (Sprint 8B — ADR-0008) ────────────────────────────────
+
+    async def list_due(self, *, limit: int = 50) -> list[FollowUpTask]:
+        """Pending tasks whose schedule has arrived, oldest-first.
+
+        Due = status='pending' AND (scheduled_for IS NULL OR scheduled_for <= now()).
+        NULL scheduled_for means "do-asap" (question follow-ups) and sorts first.
+        RLS + the explicit tenant filter keep this scoped to the caller's tenant —
+        the cadence runs this inside a per-tenant subtask that has already called
+        set_rls_tenant().  `now()` is evaluated DB-side for clock consistency.
+        """
+        ctx = get_tenant_context()
+        stmt = (
+            select(FollowUpTask)
+            .where(
+                FollowUpTask.tenant_id == ctx.org_id,
+                FollowUpTask.status == "pending",
+                (FollowUpTask.scheduled_for.is_(None))
+                | (FollowUpTask.scheduled_for <= func.now()),
+            )
+            .order_by(
+                FollowUpTask.scheduled_for.asc().nullsfirst(),
+                FollowUpTask.created_at.asc(),
+            )
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def claim(self, task_id: uuid.UUID) -> bool:
+        """Atomically transition pending→processing for exactly one worker.
+
+        Returns True only for the worker whose guarded UPDATE matched the row
+        while it was still 'pending'.  Concurrent callers see zero affected rows
+        and get False — this is the authoritative double-processing guard
+        (ADR-0008 §8).  Increments `attempts` so a poison row can be retired.
+        Must run inside the RLS-scoped transaction (SET LOCAL is txn-bound).
+        """
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            update(FollowUpTask)
+            .where(
+                FollowUpTask.id == task_id,
+                FollowUpTask.tenant_id == ctx.org_id,
+                FollowUpTask.status == "pending",
+            )
+            .values(status="processing", attempts=FollowUpTask.attempts + 1)
+            .returning(FollowUpTask.id)
+        )
+        return result.first() is not None
+
+    async def mark_done(
+        self, task_id: uuid.UUID, *, result_outbound_message_id: uuid.UUID
+    ) -> None:
+        """Terminal: the follow-up was generated and sent (auto path)."""
+        await self._set_terminal(
+            task_id,
+            status="done",
+            result_outbound_message_id=result_outbound_message_id,
+        )
+
+    async def mark_awaiting_approval(
+        self, task_id: uuid.UUID, *, result_outbound_message_id: uuid.UUID
+    ) -> None:
+        """Park: draft generated, held for human approval (HITL / Sprint 8C)."""
+        await self._set_terminal(
+            task_id,
+            status="awaiting_approval",
+            result_outbound_message_id=result_outbound_message_id,
+        )
+
+    async def mark_cancelled(self, task_id: uuid.UUID, *, reason: str) -> None:
+        """Terminal: blocked by compliance, unresolvable, or retries exhausted.
+
+        Appends the reason to notes (preserving the original) so the timeline /
+        forensic queries explain why nothing was sent.
+        """
+        ctx = get_tenant_context()
+        await self._session.execute(
+            update(FollowUpTask)
+            .where(FollowUpTask.id == task_id, FollowUpTask.tenant_id == ctx.org_id)
+            .values(
+                status="cancelled",
+                notes=func.concat(
+                    func.coalesce(FollowUpTask.notes, ""),
+                    f" | Auto-cancelled: {reason}",
+                ),
+            )
+        )
+
+    async def defer(self, task_id: uuid.UUID, *, scheduled_for: datetime) -> None:
+        """Return a claimed task to the queue with a future schedule.
+
+        Used by the quiet-hours gate: the row was claimed (processing) but the
+        recipient-local time is outside the send window, so we release it back to
+        'pending' with scheduled_for set to the next in-window moment.  No LLM
+        spend occurred.  Only affects rows still in 'processing'.
+        """
+        ctx = get_tenant_context()
+        await self._session.execute(
+            update(FollowUpTask)
+            .where(
+                FollowUpTask.id == task_id,
+                FollowUpTask.tenant_id == ctx.org_id,
+                FollowUpTask.status == "processing",
+            )
+            .values(status="pending", scheduled_for=scheduled_for)
+        )
+
+    async def reset_stuck_processing(self, *, older_than: datetime) -> int:
+        """Reaper: return long-stuck 'processing' rows to 'pending'.
+
+        A worker that crashed after claim but before a terminal transition leaves
+        a row in 'processing'.  Any row last touched before `older_than` (caller
+        passes now - time_limit) is reclaimable.  Returns the number reset.
+        Idempotent: a still-alive worker's row that gets reset will simply be
+        re-claimed (the claim is atomic), so the reaper threshold ≥ task time_limit.
+        """
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            update(FollowUpTask)
+            .where(
+                FollowUpTask.tenant_id == ctx.org_id,
+                FollowUpTask.status == "processing",
+                FollowUpTask.updated_at < older_than,
+            )
+            .values(status="pending")
+        )
+        return result.rowcount  # type: ignore[union-attr]
+
+    async def _set_terminal(
+        self,
+        task_id: uuid.UUID,
+        *,
+        status: str,
+        result_outbound_message_id: uuid.UUID,
+    ) -> None:
+        ctx = get_tenant_context()
+        await self._session.execute(
+            update(FollowUpTask)
+            .where(FollowUpTask.id == task_id, FollowUpTask.tenant_id == ctx.org_id)
+            .values(
+                status=status,
+                result_outbound_message_id=result_outbound_message_id,
+            )
+        )
 
 
 # ── AutomationLogRepo (Sprint 4C) ─────────────────────────────────────────────
