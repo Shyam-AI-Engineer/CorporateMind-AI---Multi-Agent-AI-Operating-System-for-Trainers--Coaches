@@ -12,7 +12,7 @@ import uuid
 from typing import Any, TypedDict
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 
 class PlanStep(TypedDict):
@@ -60,12 +60,20 @@ class AgentState(TypedDict, total=False):
     trainer_niche: str | None
     trainer_tone: str | None
     trainer_topics: list[str]
+    trainer_context: dict[str, Any]   # full SQL trainer profile dict; authoritative
+    trainer_qdrant_score: float       # top-1 cosine score from Qdrant; 0.0 if unavailable
+
+    # ── Per-recipient outreach context ────────────────────────────────────────
+    contact_id: str | None            # single recipient UUID for OutreachAgent runs
+    contact_context: dict[str, Any]   # full SQL contact dict from _fetch_contact
 
     # ── HR discovery context ──────────────────────────────────────────────────
     target_industries: list[str]
     target_employee_ranges: list[str]
+    discovered_company_ids: list[str]   # companies matched in _discover_companies
     discovered_contact_ids: list[str]
     qualified_contact_ids: list[str]
+    qualify_score_threshold: int        # minimum score (1–10) a contact must reach; default 5
 
     # ── Outreach context ──────────────────────────────────────────────────────
     campaign_id: str | None
@@ -129,10 +137,16 @@ def default_state(
         trainer_niche=None,
         trainer_tone=None,
         trainer_topics=[],
+        trainer_context={},
+        trainer_qdrant_score=0.0,
+        contact_id=None,
+        contact_context={},
         target_industries=[],
         target_employee_ranges=[],
+        discovered_company_ids=[],
         discovered_contact_ids=[],
         qualified_contact_ids=[],
+        qualify_score_threshold=5,
         campaign_id=None,
         channel=None,
         outreach_message_ids=[],

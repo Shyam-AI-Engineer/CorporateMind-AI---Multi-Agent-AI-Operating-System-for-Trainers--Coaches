@@ -362,18 +362,7 @@ class OutreachService:
     # ── Parsing ───────────────────────────────────────────────────────────────
 
     def _parse_copy(self, raw: str) -> dict:
-        stripped = raw.strip()
-        if stripped.startswith("```"):
-            stripped = stripped.strip("`")
-            if stripped.startswith("json"):
-                stripped = stripped[4:].lstrip()
-        try:
-            data = json.loads(stripped)
-        except json.JSONDecodeError as exc:
-            raise ValidationError(f"Outreach copy returned non-JSON: {exc}") from exc
-        if not data.get("body"):
-            raise ValidationError("Outreach copy missing required 'body' field")
-        return data
+        return _parse_outreach_copy(raw)
 
     def _parse_followup(self, raw: str, task_type: str) -> dict:
         """Parse a follow-up LLM response into {subject, body, needs_human_review, answered}.
@@ -429,6 +418,28 @@ class OutreachService:
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────────
+
+def _parse_outreach_copy(raw: str) -> dict:
+    """Parse the LLM JSON response for outreach copy into a plain dict.
+
+    Strips optional markdown fences, validates JSON, and asserts that the
+    required ``body`` field is present.  Extracted from ``OutreachService``
+    so ``OutreachAgent._generate_variants`` can import it without pulling in
+    the full service class (and its EuriClient / compliance dependencies).
+    """
+    stripped = raw.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`")
+        if stripped.startswith("json"):
+            stripped = stripped[4:].lstrip()
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"Outreach copy returned non-JSON: {exc}") from exc
+    if not data.get("body"):
+        raise ValidationError("Outreach copy missing required 'body' field")
+    return data
+
 
 def recipient_hmac(email: str | None, tenant_id: uuid.UUID) -> str | None:
     """HMAC-SHA256(email, org_id) — per-tenant hash, safe for audit/unsubscribe lookups."""

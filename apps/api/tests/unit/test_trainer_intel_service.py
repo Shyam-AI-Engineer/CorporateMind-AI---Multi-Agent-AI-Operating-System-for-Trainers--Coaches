@@ -18,6 +18,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from unittest.mock import patch
+
 from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationError
 from corpmind.core.tenancy import clear_tenant_context, set_tenant_context
 from corpmind.modules.trainer_intel.schemas import (
@@ -206,3 +208,95 @@ async def test_update_profile_locked_raises_conflict(bound_tenant) -> None:
     svc, _, _ = _make_service_with_mocks(existing_profile=_fake_profile(is_locked=True))
     with pytest.raises(ConflictError):
         await svc.update_profile(TrainerProfileUpdate(niche="x"))
+
+
+# ── lock_profile ──────────────────────────────────────────────────────────────
+
+def _make_lockable_service(profile=None):
+    """Service whose session + repo are mocked for lock_profile tests."""
+    session = MagicMock()
+    session.commit = AsyncMock()
+    svc = TrainerIntelService(session)
+    svc._repo.find_for_workspace = AsyncMock(return_value=profile)
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_lock_profile_indexes_into_vector_store(bound_tenant) -> None:
+    """After a successful commit, TrainerVectorStore.upsert_profile is called."""
+    profile = _fake_profile(
+        is_locked=False,
+        niche="Leadership coaching",
+        bio="15 years in BFSI",
+        topics=["Executive Presence"],
+    )
+    svc = _make_lockable_service(profile)
+    mock_store = AsyncMock()
+
+    with patch("corpmind.modules.trainer_intel.service.TrainerVectorStore") as MockVS:
+        MockVS.return_value = mock_store
+        result = await svc.lock_profile()
+
+    MockVS.assert_called_once()
+    mock_store.upsert_profile.assert_awaited_once()
+    upsert_kw = mock_store.upsert_profile.await_args.kwargs
+    assert upsert_kw["org_id"] == bound_tenant.org_id
+    assert upsert_kw["workspace_id"] == profile.workspace_id
+    assert upsert_kw["niche"] == "Leadership coaching"
+    mock_store.aclose.assert_awaited_once()
+    assert result.is_locked is True
+
+
+@pytest.mark.asyncio
+async def test_lock_profile_qdrant_failure_does_not_fail_lock(bound_tenant) -> None:
+    """If the vector store raises, lock_profile still returns a locked profile."""
+    profile = _fake_profile(is_locked=False, niche="Sales", bio="Coach bio", topics=["Sales"])
+    svc = _make_lockable_service(profile)
+    mock_store = AsyncMock()
+    mock_store.upsert_profile.side_effect = RuntimeError("Qdrant connection refused")
+
+    with patch("corpmind.modules.trainer_intel.service.TrainerVectorStore") as MockVS:
+        MockVS.return_value = mock_store
+        result = await svc.lock_profile()  # must not raise
+
+    # DB commit still happened; lock must be reflected in the return value
+    svc._session.commit.assert_awaited_once()
+    assert result.is_locked is True
+
+
+@pytest.mark.asyncio
+async def test_lock_profile_missing_profile_raises_not_found(bound_tenant) -> None:
+    svc = _make_lockable_service(profile=None)
+    with pytest.raises(NotFoundError):
+        await svc.lock_profile()
+
+
+@pytest.mark.asyncio
+async def test_lock_profile_already_locked_raises_conflict(bound_tenant) -> None:
+    svc = _make_lockable_service(_fake_profile(is_locked=True))
+    with pytest.raises(ConflictError, match="already locked"):
+        await svc.lock_profile()
+
+
+@pytest.mark.asyncio
+async def test_lock_profile_missing_niche_raises_validation(bound_tenant) -> None:
+    profile = _fake_profile(is_locked=False, niche=None, bio="Some bio", topics=["T1"])
+    svc = _make_lockable_service(profile)
+    with pytest.raises(ValidationError, match="niche"):
+        await svc.lock_profile()
+
+
+@pytest.mark.asyncio
+async def test_lock_profile_missing_bio_raises_validation(bound_tenant) -> None:
+    profile = _fake_profile(is_locked=False, niche="Coaching", bio=None, topics=["T1"])
+    svc = _make_lockable_service(profile)
+    with pytest.raises(ValidationError, match="bio"):
+        await svc.lock_profile()
+
+
+@pytest.mark.asyncio
+async def test_lock_profile_empty_topics_raises_validation(bound_tenant) -> None:
+    profile = _fake_profile(is_locked=False, niche="Coaching", bio="Bio text", topics=[])
+    svc = _make_lockable_service(profile)
+    with pytest.raises(ValidationError, match="topics"):
+        await svc.lock_profile()

@@ -15,9 +15,7 @@ import { useState } from "react";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { AlertCircle, Inbox, RefreshCw } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useInboxMessages } from "@/features/inbox/api/use-inbox";
 import { IntentBadge } from "@/features/inbox/ui/intent-badge";

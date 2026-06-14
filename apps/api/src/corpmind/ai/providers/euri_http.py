@@ -130,6 +130,49 @@ class EuriHTTPProvider:
         )
         return extract_content(response)
 
+    async def embed(
+        self,
+        text: str,
+        *,
+        model: str = "text-embedding-3-small",
+        dimensions: int = 384,
+        call_id: str = "",
+    ) -> list[float]:
+        """Generate a text embedding via the Euri embeddings endpoint.
+
+        Uses OpenAI-compatible /embeddings API with Matryoshka dimension
+        reduction (dimensions=384 matches the bge-small collection schema).
+        """
+        payload: dict[str, Any] = {
+            "model": model,
+            "input": text,
+            "dimensions": dimensions,
+        }
+        for attempt, delay in enumerate([0.0] + _RETRY_DELAYS):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                resp = await self._client.post("embeddings", json=payload)
+                if resp.status_code == 429:
+                    raise RateLimitError(f"Rate limited on embedding model {model}")
+                if resp.status_code >= 500:
+                    log.warning(
+                        "euri.embed_server_error",
+                        model=model,
+                        status=resp.status_code,
+                        attempt=attempt,
+                        call_id=call_id,
+                    )
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                return data["data"][0]["embedding"]
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                log.warning("euri.embed_network_error", attempt=attempt, error=str(exc))
+                if attempt == len(_RETRY_DELAYS):
+                    raise ModelUnavailableError(f"Embedding network error: {exc}") from exc
+        raise ModelUnavailableError(f"Embedding model {model} unavailable after retries")
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

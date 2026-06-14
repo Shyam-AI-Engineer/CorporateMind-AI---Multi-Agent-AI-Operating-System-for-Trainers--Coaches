@@ -48,6 +48,34 @@ class CompanyRepo:
         await self.create(company)
         return company, True
 
+    async def search_by_industries(
+        self,
+        industries: list[str],
+        employee_ranges: list[str],
+        limit: int = 200,
+    ) -> list[Company]:
+        """Return companies matching the given industry and employee-range filters.
+
+        When ``industries`` is empty, all tenant companies are returned (up to
+        ``limit``).  Each filter is optional; passing both narrows the result set.
+        Results are ordered newest-first so freshly-imported companies surface at
+        the top of the discovery pool.
+        """
+        ctx = get_tenant_context()
+        stmt = (
+            select(Company)
+            .where(Company.tenant_id == ctx.org_id)
+            .order_by(Company.created_at.desc())
+            .limit(limit)
+        )
+        if industries:
+            industries_lower = [i.lower() for i in industries]
+            stmt = stmt.where(func.lower(Company.industry).in_(industries_lower))
+        if employee_ranges:
+            stmt = stmt.where(Company.employee_count_range.in_(employee_ranges))
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
 
 class HRContactRepo:
     def __init__(self, session: AsyncSession) -> None:

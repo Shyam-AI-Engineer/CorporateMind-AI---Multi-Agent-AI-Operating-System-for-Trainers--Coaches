@@ -7,6 +7,7 @@ from typing import Any
 
 import structlog
 from langgraph.graph import StateGraph
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.agents.state import AgentState
 
@@ -19,9 +20,17 @@ class BaseAgent(ABC):
     Subclasses implement `build_graph()` and register their tools.
     The runner (Celery task) calls `run()` which handles checkpointing,
     Langfuse tracing, and HITL routing.
+
+    ``session`` is optional: agents that do not need DB access (e.g.
+    ComplianceGuardAgent in its current form) can be constructed without one.
+    Agents that persist state (OutreachAgent) require a session and guard
+    internally in nodes that write to the DB.
     """
 
     name: str = ""
+
+    def __init__(self, session: AsyncSession | None = None) -> None:
+        self._session = session
 
     @abstractmethod
     def build_graph(self) -> StateGraph:

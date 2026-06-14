@@ -19,6 +19,7 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.ai.euri_client import EuriClient
+from corpmind.ai.trainer_vector_store import TrainerVectorStore
 from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationError
 from corpmind.core.tenancy import get_tenant_context
 from corpmind.modules.trainer_intel.repo import TrainerProfileRepo
@@ -113,6 +114,30 @@ class TrainerIntelService:
         profile.locked_at = datetime.now(UTC)
         await self._session.commit()
         log.info("trainer_intel.locked", profile_id=str(profile.id))
+
+        # Index into Qdrant for outreach personalization.
+        # Runs after commit so the DB lock is durable regardless of Qdrant state.
+        try:
+            store = TrainerVectorStore()
+            await store.upsert_profile(
+                profile_id=profile.id,
+                org_id=ctx.org_id,
+                workspace_id=profile.workspace_id,
+                niche=profile.niche,
+                bio=profile.bio,
+                usp=profile.usp,
+                topics=list(profile.topics),
+                target_industries=list(profile.target_industries),
+                locked_at=profile.locked_at,
+            )
+            await store.aclose()
+        except Exception:
+            log.warning(
+                "trainer_intel.vector_index_failed",
+                profile_id=str(profile.id),
+                exc_info=True,
+            )
+
         return TrainerProfileOut.model_validate(profile)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
