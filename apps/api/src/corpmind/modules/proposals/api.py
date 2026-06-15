@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,11 +12,14 @@ from corpmind.modules.proposals.schemas import (
     GenerateProposalRequest,
     ProposalListOut,
     ProposalOut,
+    ProposalRejectRequest,
     ProposalSendRequest,
 )
 from corpmind.modules.proposals.service import ProposalService
 
 router = APIRouter()
+
+_VALID_APPROVAL_STATUSES = {"pending_approval", "approved", "rejected"}
 
 
 @router.post(
@@ -43,10 +45,20 @@ async def list_proposals(
     workspace_id: uuid.UUID = Query(...),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    approval_status: str | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> ProposalListOut:
+    validated_status: str | None = None
+    if approval_status is not None:
+        if approval_status not in _VALID_APPROVAL_STATUSES:
+            from corpmind.core.exceptions import ValidationError
+            raise ValidationError(
+                f"approval_status must be one of {sorted(_VALID_APPROVAL_STATUSES)}"
+            )
+        validated_status = approval_status
+
     return await ProposalService(session).list_proposals(
-        workspace_id, limit=limit, offset=offset
+        workspace_id, limit=limit, offset=offset, approval_status=validated_status
     )
 
 
@@ -63,9 +75,34 @@ async def get_proposal(
 
 
 @router.post(
+    "/{proposal_id}/approve",
+    response_model=ProposalOut,
+    summary="Approve a proposal (OrgAdmin only)",
+)
+async def approve_proposal(
+    proposal_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ProposalOut:
+    return await ProposalService(session).approve(proposal_id)
+
+
+@router.post(
+    "/{proposal_id}/reject",
+    response_model=ProposalOut,
+    summary="Reject a proposal with a reason (OrgAdmin only)",
+)
+async def reject_proposal(
+    proposal_id: uuid.UUID,
+    req: ProposalRejectRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ProposalOut:
+    return await ProposalService(session).reject(proposal_id, reason=req.reason)
+
+
+@router.post(
     "/{proposal_id}/send",
     response_model=ProposalOut,
-    summary="Mark a proposal as sent",
+    summary="Mark a proposal as sent (requires prior approval)",
 )
 async def mark_proposal_sent(
     proposal_id: uuid.UUID,

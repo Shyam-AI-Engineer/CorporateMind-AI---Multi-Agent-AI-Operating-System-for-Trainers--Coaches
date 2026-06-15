@@ -24,3 +24,14 @@ class Proposal(TenantBase):
     cloudinary_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Sprint 12A — approval workflow (expand step; see migration c2e8f5a4d9b7)
+    approval_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="pending_approval",         # Python-side default for in-memory objects
+        server_default="pending_approval",  # DB-side default for SQL INSERT / backfill
+    )
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

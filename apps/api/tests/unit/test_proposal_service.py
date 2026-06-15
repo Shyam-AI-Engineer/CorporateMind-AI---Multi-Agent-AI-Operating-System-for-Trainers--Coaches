@@ -69,7 +69,10 @@ def _make_lead(stage: str = "meeting_completed", score: int = 75) -> LeadOut:
     )
 
 
-def _make_proposal(status: str = "draft") -> Proposal:
+def _make_proposal(
+    status: str = "draft",
+    approval_status: str = "pending_approval",
+) -> Proposal:
     p = Proposal(
         tenant_id=_ORG_ID,
         workspace_id=_WS_ID,
@@ -82,6 +85,13 @@ def _make_proposal(status: str = "draft") -> Proposal:
     p.cloudinary_url = None
     p.sent_at = None
     p.created_at = datetime.now(UTC)
+    # Approval fields must be set explicitly — Python-side default is applied at
+    # flush time, not at constructor time, so unit tests using mock sessions need
+    # these set directly.
+    p.approval_status = approval_status
+    p.approved_by = None
+    p.approved_at = None
+    p.rejected_reason = None
     return p
 
 
@@ -371,12 +381,12 @@ async def test_list_proposals_empty():
 
 @pytest.mark.asyncio
 async def test_mark_sent_happy_path():
-    """Draft proposal transitions to 'sent' with sent_at populated."""
+    """Approved draft proposal transitions to 'sent' with sent_at populated."""
     token = set_tenant_context(_CTX)
     session = _make_session()
     svc = ProposalService(session)
 
-    svc._repo.find_by_id = AsyncMock(return_value=_make_proposal("draft"))
+    svc._repo.find_by_id = AsyncMock(return_value=_make_proposal("draft", approval_status="approved"))
     svc._repo.update_fields = AsyncMock()
 
     result = await svc.mark_sent(_PROPOSAL_ID)
@@ -392,14 +402,30 @@ async def test_mark_sent_happy_path():
 
 @pytest.mark.asyncio
 async def test_mark_sent_already_sent_raises():
-    """ConflictError when marking an already-sent proposal."""
+    """ConflictError when marking an already-sent proposal (status check fires first)."""
     token = set_tenant_context(_CTX)
     session = _make_session()
     svc = ProposalService(session)
 
-    svc._repo.find_by_id = AsyncMock(return_value=_make_proposal("sent"))
+    # approval_status="approved" so only the status="sent" guard triggers, not the approval guard
+    svc._repo.find_by_id = AsyncMock(return_value=_make_proposal("sent", approval_status="approved"))
 
     with pytest.raises(ConflictError, match="already been sent"):
+        await svc.mark_sent(_PROPOSAL_ID)
+
+    clear_tenant_context(token)
+
+
+@pytest.mark.asyncio
+async def test_mark_sent_pending_approval_raises():
+    """ConflictError when proposal has not been approved yet."""
+    token = set_tenant_context(_CTX)
+    session = _make_session()
+    svc = ProposalService(session)
+
+    svc._repo.find_by_id = AsyncMock(return_value=_make_proposal("draft", approval_status="pending_approval"))
+
+    with pytest.raises(ConflictError, match="must be approved"):
         await svc.mark_sent(_PROPOSAL_ID)
 
     clear_tenant_context(token)

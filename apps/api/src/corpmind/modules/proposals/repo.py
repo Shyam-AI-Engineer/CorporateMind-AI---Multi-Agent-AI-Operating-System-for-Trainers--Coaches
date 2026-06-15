@@ -31,15 +31,29 @@ class ProposalRepo:
         )
         return result.scalar_one_or_none()
 
+    async def find_by_id_for_update(self, proposal_id: uuid.UUID) -> Proposal | None:
+        """SELECT … FOR UPDATE — acquires a row-level lock for atomic state transitions."""
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(Proposal)
+            .where(
+                Proposal.id == proposal_id,
+                Proposal.tenant_id == ctx.org_id,
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def list_by_workspace(
         self,
         workspace_id: uuid.UUID,
         *,
         limit: int = 50,
         offset: int = 0,
+        approval_status: str | None = None,
     ) -> list[Proposal]:
         ctx = get_tenant_context()
-        result = await self._session.execute(
+        stmt = (
             select(Proposal)
             .where(
                 Proposal.workspace_id == workspace_id,
@@ -49,11 +63,19 @@ class ProposalRepo:
             .limit(limit)
             .offset(offset)
         )
+        if approval_status is not None:
+            stmt = stmt.where(Proposal.approval_status == approval_status)
+        result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count_by_workspace(self, workspace_id: uuid.UUID) -> int:
+    async def count_by_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        approval_status: str | None = None,
+    ) -> int:
         ctx = get_tenant_context()
-        result = await self._session.execute(
+        stmt = (
             select(func.count())
             .select_from(Proposal)
             .where(
@@ -61,6 +83,9 @@ class ProposalRepo:
                 Proposal.tenant_id == ctx.org_id,
             )
         )
+        if approval_status is not None:
+            stmt = stmt.where(Proposal.approval_status == approval_status)
+        result = await self._session.execute(stmt)
         return result.scalar_one()
 
     async def update_fields(self, proposal_id: uuid.UUID, **values: Any) -> None:

@@ -335,6 +335,8 @@ class TestProposalRepoUpdateFields:
             # triggers a synchronous lazy-load in async SQLAlchemy (MissingGreenlet).
             proposal_id = created.id
 
+            # Must approve before sending — CHECK constraint enforces this at DB level.
+            await repo.update_fields(proposal_id, approval_status="approved")
             sent_at = datetime.now(UTC)
             await repo.update_fields(proposal_id, status="sent", sent_at=sent_at)
             await db_session.flush()
@@ -379,6 +381,144 @@ class TestProposalRepoUpdateFields:
             assert found.status == "draft", "Tenant B's update must not affect Tenant A's proposal"
         finally:
             clear_tenant_context(token_a)
+
+
+# ── ProposalRepo.find_by_id_for_update ────────────────────────────────────────
+
+class TestProposalRepoFindByIdForUpdate:
+    @pytest.mark.asyncio
+    async def test_find_for_update_returns_proposal(self, db_session, tenant_a):
+        token = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        try:
+            prop = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+            repo = ProposalRepo(db_session)
+            created = await repo.create(prop)
+            await db_session.flush()
+
+            found = await repo.find_by_id_for_update(created.id)
+            assert found is not None
+            assert found.id == created.id
+            assert found.approval_status == "pending_approval"
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_find_for_update_returns_none_for_unknown_id(self, db_session, tenant_a):
+        token = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        try:
+            repo = ProposalRepo(db_session)
+            result = await repo.find_by_id_for_update(uuid.uuid4())
+            assert result is None
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_find_for_update_invisible_to_other_tenant(
+        self, db_session, tenant_a, tenant_b
+    ):
+        # Write as tenant A
+        token_a = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        prop = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+        repo = ProposalRepo(db_session)
+        created = await repo.create(prop)
+        await db_session.flush()
+        proposal_id = created.id
+        clear_tenant_context(token_a)
+
+        # FOR UPDATE as tenant B — must return None (RLS filters the row)
+        token_b = set_tenant_context(tenant_b)
+        await set_rls_tenant(db_session, tenant_b.org_id)
+        try:
+            result = await repo.find_by_id_for_update(proposal_id)
+            assert result is None, "Tenant B must not lock Tenant A's proposal row"
+        finally:
+            clear_tenant_context(token_b)
+
+
+# ── ProposalRepo.list_by_workspace (approval_status filter) ───────────────────
+
+class TestProposalRepoListApprovalFilter:
+    @pytest.mark.asyncio
+    async def test_list_filters_by_approval_status_pending(self, db_session, tenant_a):
+        token = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        try:
+            ws_id = uuid.uuid4()
+            repo = ProposalRepo(db_session)
+
+            pending = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+            pending.workspace_id = ws_id
+            created_pending = await repo.create(pending)
+
+            approved = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+            approved.workspace_id = ws_id
+            created_approved = await repo.create(approved)
+            await db_session.flush()
+
+            # Directly update approval_status via update_fields
+            await repo.update_fields(created_approved.id, approval_status="approved")
+            await db_session.flush()
+
+            results = await repo.list_by_workspace(ws_id, approval_status="pending_approval")
+            ids = [r.id for r in results]
+            assert created_pending.id in ids
+            assert created_approved.id not in ids
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_count_filters_by_approval_status(self, db_session, tenant_a):
+        token = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        try:
+            ws_id = uuid.uuid4()
+            repo = ProposalRepo(db_session)
+
+            for _ in range(2):
+                p = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+                p.workspace_id = ws_id
+                await repo.create(p)
+
+            approved = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+            approved.workspace_id = ws_id
+            created_approved = await repo.create(approved)
+            await db_session.flush()
+            await repo.update_fields(created_approved.id, approval_status="approved")
+            await db_session.flush()
+
+            pending_count = await repo.count_by_workspace(ws_id, approval_status="pending_approval")
+            approved_count = await repo.count_by_workspace(ws_id, approval_status="approved")
+            assert pending_count == 2
+            assert approved_count == 1
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_approval_filter_cross_tenant_invisible(
+        self, db_session, tenant_a, tenant_b
+    ):
+        """Tenant B cannot see Tenant A's pending proposals via the approval filter."""
+        token_a = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        repo = ProposalRepo(db_session)
+        p = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+        await repo.create(p)
+        await db_session.flush()
+        a_workspace = tenant_a.workspace_id
+        clear_tenant_context(token_a)
+
+        token_b = set_tenant_context(tenant_b)
+        await set_rls_tenant(db_session, tenant_b.org_id)
+        try:
+            results = await repo.list_by_workspace(
+                a_workspace, approval_status="pending_approval"
+            )
+            assert results == [], "Tenant B must not see Tenant A's pending proposals"
+        finally:
+            clear_tenant_context(token_b)
 
 
 # ── RLS DB-layer isolation ─────────────────────────────────────────────────────

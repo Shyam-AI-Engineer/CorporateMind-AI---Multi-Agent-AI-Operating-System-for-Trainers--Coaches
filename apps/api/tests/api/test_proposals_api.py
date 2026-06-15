@@ -1,6 +1,6 @@
 """HTTP-layer tests for /api/v1/proposals/*.
 
-Test matrix (16 tests):
+Test matrix (27 tests):
 
   POST /proposals/
     - happy path: eligible lead → 201, status=draft, schema valid
@@ -13,14 +13,28 @@ Test matrix (16 tests):
     - empty for unknown workspace → 200, total=0
     - pagination: offset > 0 returns later items
     - unauthenticated → 401
+    - approval_status filter: pending vs approved
 
   GET /proposals/{id}
-    - success → 200, full ProposalOut shape
+    - success → 200, full ProposalOut shape (includes approval_status)
     - not found → 404
     - unauthenticated → 401
 
+  POST /proposals/{id}/approve
+    - happy path → 200, approval_status=approved
+    - already approved → 409
+    - not found → 404
+    - unauthenticated → 401
+
+  POST /proposals/{id}/reject
+    - happy path → 200, approval_status=rejected, reason stored
+    - empty reason → 422
+    - already rejected → 409
+    - unauthenticated → 401
+
   POST /proposals/{id}/send
-    - transitions draft → sent → 200, status=sent
+    - approved draft → sent → 200, status=sent
+    - pending_approval → 409 (not approved yet)
     - already sent → 409
     - unauthenticated → 401
 
@@ -32,6 +46,8 @@ NOTE: Leads must be seeded via NullPool so the stage can be set directly to
 'meeting_completed' without stepping through the CRM advance chain.
 EuriClient.chat is patched at the class level to intercept the fresh
 instantiation inside ProposalService.generate().
+All registered users are OrgAdmin (identity service default), so approve/reject
+happy-path tests work without special role setup.
 """
 
 from __future__ import annotations
@@ -361,6 +377,11 @@ async def test_get_proposal_returns_200(
     assert body["status"] == "draft"
     assert isinstance(body["content"], dict)
     assert "title" in body["content"]
+    # Sprint 12A: approval fields present in every ProposalOut response
+    assert body["approval_status"] == "pending_approval"
+    assert body["approved_by"] is None
+    assert body["approved_at"] is None
+    assert body["rejected_reason"] is None
 
 
 @pytest.mark.asyncio
@@ -381,13 +402,13 @@ async def test_get_proposal_unauthenticated_returns_401(api_client: AsyncClient)
     assert resp.json()["code"] == "unauthenticated"
 
 
-# ── POST /proposals/{id}/send ─────────────────────────────────────────────────
+# ── POST /proposals/{id}/approve ─────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_mark_sent_transitions_draft_to_sent(
+async def test_approve_proposal_returns_200(
     api_client: AsyncClient, db_engine: AsyncEngine
 ) -> None:
-    """Marking a draft proposal as sent returns 200 with status='sent'."""
+    """OrgAdmin can approve a pending proposal; response has approval_status=approved."""
     user = await make_user(api_client)
     token = user["tokens"]["access_token"]
     claims = _claims(token)
@@ -397,14 +418,205 @@ async def test_mark_sent_transitions_draft_to_sent(
     proposal_id = proposal["id"]
 
     resp = await api_client.post(
-        f"/api/v1/proposals/{proposal_id}/send",
+        f"/api/v1/proposals/{proposal_id}/approve",
         headers=_auth(token),
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["id"] == proposal_id
+    assert body["approval_status"] == "approved"
+    assert body["approved_by"] is not None
+    assert body["approved_at"] is not None
+    assert body["status"] == "draft"  # delivery status unchanged
+
+
+@pytest.mark.asyncio
+async def test_approve_already_approved_returns_409(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """Approving an already-approved proposal returns 409."""
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
+    proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
+    proposal_id = proposal["id"]
+
+    resp1 = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/approve",
+        headers=_auth(token),
+    )
+    assert resp1.status_code == 200
+
+    resp2 = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/approve",
+        headers=_auth(token),
+    )
+    assert resp2.status_code == 409
+    assert resp2.json()["code"] == "conflict"
+
+
+@pytest.mark.asyncio
+async def test_approve_not_found_returns_404(api_client: AsyncClient) -> None:
+    """Approving a non-existent proposal returns 404."""
+    user = await make_user(api_client)
+    resp = await api_client.post(
+        f"/api/v1/proposals/{uuid.uuid4()}/approve",
+        headers=_auth(user["tokens"]["access_token"]),
+    )
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_approve_unauthenticated_returns_401(api_client: AsyncClient) -> None:
+    resp = await api_client.post(f"/api/v1/proposals/{uuid.uuid4()}/approve")
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "unauthenticated"
+
+
+# ── POST /proposals/{id}/reject ───────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_reject_proposal_returns_200(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """OrgAdmin can reject a pending proposal; reason is stored in response."""
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
+    proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
+    proposal_id = proposal["id"]
+
+    resp = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/reject",
+        json={"reason": "Scope does not align with Q3 budget constraints"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == proposal_id
+    assert body["approval_status"] == "rejected"
+    assert body["rejected_reason"] == "Scope does not align with Q3 budget constraints"
+
+
+@pytest.mark.asyncio
+async def test_reject_empty_reason_returns_422(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """Rejection with blank reason fails schema validation — 422."""
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
+    proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
+    proposal_id = proposal["id"]
+
+    resp = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/reject",
+        json={"reason": "   "},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_reject_already_rejected_returns_409(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """Rejecting an already-rejected proposal returns 409."""
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
+    proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
+    proposal_id = proposal["id"]
+
+    resp1 = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/reject",
+        json={"reason": "Initial rejection"},
+        headers=_auth(token),
+    )
+    assert resp1.status_code == 200
+
+    resp2 = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/reject",
+        json={"reason": "Duplicate rejection attempt"},
+        headers=_auth(token),
+    )
+    assert resp2.status_code == 409
+    assert resp2.json()["code"] == "conflict"
+
+
+@pytest.mark.asyncio
+async def test_reject_unauthenticated_returns_401(api_client: AsyncClient) -> None:
+    resp = await api_client.post(
+        f"/api/v1/proposals/{uuid.uuid4()}/reject",
+        json={"reason": "No auth"},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "unauthenticated"
+
+
+# ── POST /proposals/{id}/send ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_mark_sent_transitions_approved_draft_to_sent(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """Approved draft proposal transitions to 'sent' after approval; returns 200."""
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
+    proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
+    proposal_id = proposal["id"]
+
+    # Must approve before sending
+    approve_resp = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/approve",
+        headers=_auth(token),
+    )
+    assert approve_resp.status_code == 200
+
+    send_resp = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/send",
+        headers=_auth(token),
+    )
+    assert send_resp.status_code == 200
+    body = send_resp.json()
+    assert body["id"] == proposal_id
     assert body["status"] == "sent"
     assert body["sent_at"] is not None
+    assert body["approval_status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_mark_sent_pending_approval_returns_409(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """Sending a proposal that has not been approved returns 409."""
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
+    proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
+    proposal_id = proposal["id"]
+
+    # No approve call — straight to send
+    resp = await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/send",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "conflict"
 
 
 @pytest.mark.asyncio
@@ -419,6 +631,12 @@ async def test_mark_sent_already_sent_returns_409(
     lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
     proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
     proposal_id = proposal["id"]
+
+    # Approve first
+    await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/approve",
+        headers=_auth(token),
+    )
 
     # First send — succeeds
     resp1 = await api_client.post(
@@ -441,6 +659,44 @@ async def test_mark_sent_unauthenticated_returns_401(api_client: AsyncClient) ->
     resp = await api_client.post(f"/api/v1/proposals/{uuid.uuid4()}/send")
     assert resp.status_code == 401
     assert resp.json()["code"] == "unauthenticated"
+
+
+# ── GET /proposals/ (approval_status filter) ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_list_filter_by_approval_status(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """approval_status=pending_approval filter returns only un-approved proposals."""
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    ws_id = claims["workspace_id"]
+
+    # Generate two proposals
+    lead_id_1 = await _seed_lead(db_engine, claims["org_id"], ws_id)
+    proposal_1 = await _generate_proposal(api_client, token, lead_id_1, ws_id)
+
+    lead_id_2 = await _seed_lead(db_engine, claims["org_id"], ws_id)
+    proposal_2 = await _generate_proposal(api_client, token, lead_id_2, ws_id)
+
+    # Approve only proposal_1
+    await api_client.post(
+        f"/api/v1/proposals/{proposal_1['id']}/approve",
+        headers=_auth(token),
+    )
+
+    # Filter by pending_approval — should return only proposal_2
+    resp = await api_client.get(
+        f"/api/v1/proposals/?workspace_id={ws_id}&approval_status=pending_approval",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == proposal_2["id"]
+    assert body["items"][0]["approval_status"] == "pending_approval"
 
 
 # ── Tenant isolation ──────────────────────────────────────────────────────────
