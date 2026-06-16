@@ -63,6 +63,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from corpmind.modules.outreach.schemas import SendMessageResponse
 from tests.api.conftest import make_user
 
 # ── Mock AI response ──────────────────────────────────────────────────────────
@@ -564,12 +565,41 @@ async def test_reject_unauthenticated_returns_401(api_client: AsyncClient) -> No
 
 
 # ── POST /proposals/{id}/send ─────────────────────────────────────────────────
+#
+# deliver() requires a real contact email (hr_contacts) and SMTP for a full
+# integration run.  The API tests patch both so the test stays fast and
+# hermetic: _fetch_contact_email returns a synthetic email; OutreachService
+# .send_message returns a queued SendMessageResponse without touching SMTP.
+# The 409 guard tests need no patches — the guards fire before any SQL runs.
+
+def _patch_deliver():
+    """Context-manager stack that makes deliver() succeed without SMTP."""
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def _ctx():
+        with patch(
+            "corpmind.modules.proposals.service.ProposalService._fetch_contact_email",
+            new=AsyncMock(return_value="hr@example.com"),
+        ):
+            with patch(
+                "corpmind.modules.outreach.service.OutreachService",
+            ) as MockOS:
+                MockOS.return_value.send_message = AsyncMock(
+                    return_value=SendMessageResponse(
+                        message_id=uuid.uuid4(), status="queued"
+                    )
+                )
+                yield
+
+    return _ctx()
+
 
 @pytest.mark.asyncio
-async def test_mark_sent_transitions_approved_draft_to_sent(
+async def test_send_proposal_transitions_approved_draft_to_sent(
     api_client: AsyncClient, db_engine: AsyncEngine
 ) -> None:
-    """Approved draft proposal transitions to 'sent' after approval; returns 200."""
+    """Approved draft → deliver() → 200; status=sent, delivery fields populated."""
     user = await make_user(api_client)
     token = user["tokens"]["access_token"]
     claims = _claims(token)
@@ -578,27 +608,27 @@ async def test_mark_sent_transitions_approved_draft_to_sent(
     proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
     proposal_id = proposal["id"]
 
-    # Must approve before sending
-    approve_resp = await api_client.post(
-        f"/api/v1/proposals/{proposal_id}/approve",
-        headers=_auth(token),
+    await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/approve", headers=_auth(token)
     )
-    assert approve_resp.status_code == 200
 
-    send_resp = await api_client.post(
-        f"/api/v1/proposals/{proposal_id}/send",
-        headers=_auth(token),
-    )
+    async with _patch_deliver():
+        send_resp = await api_client.post(
+            f"/api/v1/proposals/{proposal_id}/send", headers=_auth(token)
+        )
+
     assert send_resp.status_code == 200
     body = send_resp.json()
     assert body["id"] == proposal_id
     assert body["status"] == "sent"
     assert body["sent_at"] is not None
     assert body["approval_status"] == "approved"
+    assert body["outbound_message_id"] is not None
+    assert body["delivery_status"] == "queued"
 
 
 @pytest.mark.asyncio
-async def test_mark_sent_pending_approval_returns_409(
+async def test_send_proposal_pending_approval_returns_409(
     api_client: AsyncClient, db_engine: AsyncEngine
 ) -> None:
     """Sending a proposal that has not been approved returns 409."""
@@ -608,22 +638,19 @@ async def test_mark_sent_pending_approval_returns_409(
 
     lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
     proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
-    proposal_id = proposal["id"]
 
-    # No approve call — straight to send
     resp = await api_client.post(
-        f"/api/v1/proposals/{proposal_id}/send",
-        headers=_auth(token),
+        f"/api/v1/proposals/{proposal['id']}/send", headers=_auth(token)
     )
     assert resp.status_code == 409
     assert resp.json()["code"] == "conflict"
 
 
 @pytest.mark.asyncio
-async def test_mark_sent_already_sent_returns_409(
+async def test_send_proposal_already_sent_returns_409(
     api_client: AsyncClient, db_engine: AsyncEngine
 ) -> None:
-    """Calling send on an already-sent proposal returns 409 Conflict."""
+    """Calling send twice on the same proposal returns 409 on the second call."""
     user = await make_user(api_client)
     token = user["tokens"]["access_token"]
     claims = _claims(token)
@@ -632,33 +659,78 @@ async def test_mark_sent_already_sent_returns_409(
     proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
     proposal_id = proposal["id"]
 
-    # Approve first
     await api_client.post(
-        f"/api/v1/proposals/{proposal_id}/approve",
-        headers=_auth(token),
+        f"/api/v1/proposals/{proposal_id}/approve", headers=_auth(token)
     )
 
-    # First send — succeeds
-    resp1 = await api_client.post(
-        f"/api/v1/proposals/{proposal_id}/send",
-        headers=_auth(token),
-    )
+    async with _patch_deliver():
+        resp1 = await api_client.post(
+            f"/api/v1/proposals/{proposal_id}/send", headers=_auth(token)
+        )
     assert resp1.status_code == 200
 
-    # Second send — conflict
+    # Second send — status is now 'sent'; guard fires immediately, no patches needed
     resp2 = await api_client.post(
-        f"/api/v1/proposals/{proposal_id}/send",
-        headers=_auth(token),
+        f"/api/v1/proposals/{proposal_id}/send", headers=_auth(token)
     )
     assert resp2.status_code == 409
     assert resp2.json()["code"] == "conflict"
 
 
 @pytest.mark.asyncio
-async def test_mark_sent_unauthenticated_returns_401(api_client: AsyncClient) -> None:
+async def test_send_proposal_unauthenticated_returns_401(api_client: AsyncClient) -> None:
     resp = await api_client.post(f"/api/v1/proposals/{uuid.uuid4()}/send")
     assert resp.status_code == 401
     assert resp.json()["code"] == "unauthenticated"
+
+
+@pytest.mark.asyncio
+async def test_send_proposal_creates_outbound_message_row(
+    api_client: AsyncClient, db_engine: AsyncEngine
+) -> None:
+    """After deliver(), a row exists in outbound_messages for the proposal's contact."""
+    user = await make_user(api_client)
+    token = user["tokens"]["access_token"]
+    claims = _claims(token)
+
+    lead_id = await _seed_lead(db_engine, claims["org_id"], claims["workspace_id"])
+    proposal = await _generate_proposal(api_client, token, lead_id, claims["workspace_id"])
+    proposal_id = proposal["id"]
+
+    await api_client.post(
+        f"/api/v1/proposals/{proposal_id}/approve", headers=_auth(token)
+    )
+
+    async with _patch_deliver():
+        send_resp = await api_client.post(
+            f"/api/v1/proposals/{proposal_id}/send", headers=_auth(token)
+        )
+    assert send_resp.status_code == 200
+    outbound_id = send_resp.json()["outbound_message_id"]
+    assert outbound_id is not None
+
+    # Verify the row exists in the DB directly via NullPool (bypasses RLS for
+    # the assertion query so we don't need a full tenant session setup here).
+    seed = create_async_engine(
+        db_engine.url.render_as_string(hide_password=False), poolclass=NullPool
+    )
+    try:
+        async with seed.begin() as conn:
+            row = await conn.execute(
+                text(
+                    "SELECT id, channel, status FROM outbound_messages"
+                    " WHERE id = :mid"
+                ),
+                {"mid": outbound_id},
+            )
+            found = row.one_or_none()
+        assert found is not None, "OutboundMessage row must exist after deliver()"
+        assert found[1] == "email"
+        # Status is whatever OutreachService.send_message set — in the mock it
+        # returns 'queued' but the mock bypasses the actual DB write for the
+        # outbound_messages status column.  Assert the row exists, not its status.
+    finally:
+        await seed.dispose()
 
 
 # ── GET /proposals/ (approval_status filter) ──────────────────────────────────

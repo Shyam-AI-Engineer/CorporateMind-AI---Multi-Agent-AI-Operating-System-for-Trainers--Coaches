@@ -37,3 +37,22 @@ class ProposalRejected:
     rejected_by: uuid.UUID
     rejected_reason: str
     occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ProposalDeliveryQueued:
+    """Fired when deliver() queues an approved proposal for SMTP dispatch."""
+    proposal_id: uuid.UUID
+    tenant_id: uuid.UUID
+    outbound_message_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ProposalDeliveryBlocked:
+    """Fired when deliver() is called but ComplianceGuard blocks the send."""
+    proposal_id: uuid.UUID
+    tenant_id: uuid.UUID
+    outbound_message_id: uuid.UUID
+    compliance_reason: str | None
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))

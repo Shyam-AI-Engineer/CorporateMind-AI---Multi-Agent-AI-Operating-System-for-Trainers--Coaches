@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationError
+from corpmind.core.exceptions import NotFoundError, ValidationError
 from corpmind.core.tenancy import TenantContext, clear_tenant_context, set_tenant_context
 from corpmind.modules.crm.schemas import LeadOut
 from corpmind.modules.proposals.models import Proposal
@@ -92,6 +92,7 @@ def _make_proposal(
     p.approved_by = None
     p.approved_at = None
     p.rejected_reason = None
+    p.outbound_message_id = None  # Sprint 12B
     return p
 
 
@@ -377,70 +378,8 @@ async def test_list_proposals_empty():
     assert result.items == []
 
 
-# ── Tests: mark_sent ───────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_mark_sent_happy_path():
-    """Approved draft proposal transitions to 'sent' with sent_at populated."""
-    token = set_tenant_context(_CTX)
-    session = _make_session()
-    svc = ProposalService(session)
-
-    svc._repo.find_by_id = AsyncMock(return_value=_make_proposal("draft", approval_status="approved"))
-    svc._repo.update_fields = AsyncMock()
-
-    result = await svc.mark_sent(_PROPOSAL_ID)
-
-    clear_tenant_context(token)
-    assert result.status == "sent"
-    assert result.sent_at is not None
-    assert isinstance(result.sent_at, datetime)
-    call_kwargs = svc._repo.update_fields.call_args[1]
-    assert call_kwargs["status"] == "sent"
-    assert "sent_at" in call_kwargs
-
-
-@pytest.mark.asyncio
-async def test_mark_sent_already_sent_raises():
-    """ConflictError when marking an already-sent proposal (status check fires first)."""
-    token = set_tenant_context(_CTX)
-    session = _make_session()
-    svc = ProposalService(session)
-
-    # approval_status="approved" so only the status="sent" guard triggers, not the approval guard
-    svc._repo.find_by_id = AsyncMock(return_value=_make_proposal("sent", approval_status="approved"))
-
-    with pytest.raises(ConflictError, match="already been sent"):
-        await svc.mark_sent(_PROPOSAL_ID)
-
-    clear_tenant_context(token)
-
-
-@pytest.mark.asyncio
-async def test_mark_sent_pending_approval_raises():
-    """ConflictError when proposal has not been approved yet."""
-    token = set_tenant_context(_CTX)
-    session = _make_session()
-    svc = ProposalService(session)
-
-    svc._repo.find_by_id = AsyncMock(return_value=_make_proposal("draft", approval_status="pending_approval"))
-
-    with pytest.raises(ConflictError, match="must be approved"):
-        await svc.mark_sent(_PROPOSAL_ID)
-
-    clear_tenant_context(token)
-
-
-@pytest.mark.asyncio
-async def test_mark_sent_not_found_raises():
-    """NotFoundError when proposal does not exist."""
-    token = set_tenant_context(_CTX)
-    session = _make_session()
-    svc = ProposalService(session)
-
-    svc._repo.find_by_id = AsyncMock(return_value=None)
-
-    with pytest.raises(NotFoundError):
-        await svc.mark_sent(_PROPOSAL_ID)
-
-    clear_tenant_context(token)
+# ── Tests: mark_sent (Sprint 12B: replaced by deliver()) ──────────────────────
+# mark_sent() was removed in Sprint 12B.  The equivalent guard conditions
+# (already_sent, pending_approval, not_found) are covered by
+# test_proposal_delivery_service.py::test_deliver_*.
+# This section is intentionally empty.

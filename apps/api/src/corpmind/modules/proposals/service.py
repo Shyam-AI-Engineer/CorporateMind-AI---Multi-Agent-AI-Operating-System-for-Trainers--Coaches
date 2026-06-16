@@ -4,7 +4,10 @@ Lifecycle
 ─────────
 draft ──approve──► draft (approval_status: pending_approval → approved)
 draft ──reject──►  draft (approval_status: pending_approval → rejected)
-draft ──mark_sent──► sent  (requires approval_status = 'approved')
+draft ──deliver──► sent  (requires approval_status = 'approved')
+                   Proposal.status = 'sent' signals the trainer committed to delivery.
+                   Delivery execution state lives in OutboundMessage.status, surfaced
+                   as ProposalOut.delivery_status (a derived field, never stored).
 
 Proposals are generated for leads in 'meeting_completed' or 'booked' stage.
 Re-generating creates a new proposal; old ones are preserved.
@@ -18,6 +21,7 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.ai.euri_client import EuriClient
@@ -27,9 +31,10 @@ from corpmind.modules.compliance.service import ComplianceService
 from corpmind.modules.crm.schemas import LeadOut
 from corpmind.modules.proposals.events import (
     ProposalApproved,
+    ProposalDeliveryBlocked,
+    ProposalDeliveryQueued,
     ProposalGenerated,
     ProposalRejected,
-    ProposalSent,
 )
 from corpmind.modules.proposals.models import Proposal
 from corpmind.modules.proposals.repo import ProposalRepo
@@ -131,7 +136,10 @@ class ProposalService:
     # ── Read ────────────────────────────────────────────────────────────────────
 
     async def get_proposal(self, proposal_id: uuid.UUID) -> ProposalOut:
-        return ProposalOut.model_validate(await self._require_proposal(proposal_id))
+        proposal = await self._require_proposal(proposal_id)
+        out = ProposalOut.model_validate(proposal)
+        out.delivery_status = await self._fetch_delivery_status(proposal.outbound_message_id)
+        return out
 
     async def list_proposals(
         self,
@@ -147,8 +155,13 @@ class ProposalService:
             ),
             self._repo.count_by_workspace(workspace_id, approval_status=approval_status),
         )
+        items: list[ProposalOut] = []
+        for p in proposals:
+            out = ProposalOut.model_validate(p)
+            out.delivery_status = await self._fetch_delivery_status(p.outbound_message_id)
+            items.append(out)
         return ProposalListOut(
-            items=[ProposalOut.model_validate(p) for p in proposals],
+            items=items,
             total=total,
             limit=limit,
             offset=offset,
@@ -257,32 +270,157 @@ class ProposalService:
         proposal.rejected_reason = reason
         return ProposalOut.model_validate(proposal)
 
-    # ── State transition ────────────────────────────────────────────────────────
+    # ── Delivery ────────────────────────────────────────────────────────────────
 
-    async def mark_sent(self, proposal_id: uuid.UUID) -> ProposalOut:
-        """Transition a draft proposal to 'sent' and record the sent timestamp.
+    async def deliver(self, proposal_id: uuid.UUID) -> ProposalOut:
+        """Initiate email delivery of an approved proposal.
 
-        Requires approval_status = 'approved' before transitioning.
+        Creates an OutboundMessage linked to this proposal, runs the full
+        ComplianceGuard pipeline via OutreachService.send_message(), writes a
+        CRM activity, and records an audit event.
+
+        Idempotency: proposal.status == 'sent' is the guard.  Once set it is
+        never cleared — concurrent duplicate requests both hit the SELECT FOR
+        UPDATE and the second sees status='sent', raising ConflictError before
+        any OutboundMessage is created.
+
+        Proposal.status transitions to 'sent' regardless of compliance outcome.
+        The execution state (queued / blocked / sent / failed) is owned by
+        OutboundMessage and surfaced as ProposalOut.delivery_status.
         """
-        proposal = await self._require_proposal(proposal_id)
-        if proposal.status == "sent":
-            raise ConflictError(f"Proposal {proposal_id} has already been sent.")
+        ctx = get_tenant_context()
+
+        proposal = await self._require_proposal_for_update(proposal_id)
+
         if proposal.approval_status != "approved":
             raise ConflictError(
                 f"Proposal {proposal_id} must be approved before sending "
                 f"(current approval_status: '{proposal.approval_status}')."
             )
+        if proposal.status == "sent":
+            raise ConflictError(f"Proposal {proposal_id} has already been sent.")
 
-        sent_at = datetime.now(UTC)
-        await self._repo.update_fields(proposal_id, status="sent", sent_at=sent_at)
+        # Verify contact email exists before creating any records.
+        contact_email = await self._fetch_contact_email(proposal.contact_id, ctx.org_id)
+        if not contact_email:
+            raise NotFoundError(
+                f"Contact {proposal.contact_id} not found or has no email address."
+            )
+
+        # Extract email content from proposal JSONB.
+        # When the LLM returns a rich structured dict (executive_summary,
+        # proposed_training, etc.) there may be no flat "body" key — in that
+        # case serialize the full content so the email body is never empty.
+        subject: str = str(proposal.content.get("subject") or proposal.title)
+        body: str = str(
+            proposal.content.get("body")
+            or json.dumps(proposal.content, indent=2, ensure_ascii=False)
+        )
+        if not body:
+            raise ValidationError("Proposal content is empty — cannot generate email body.")
+
+        # ── Atomic step 1: create OutboundMessage + transition proposal ──────
+        # Both writes in one transaction so a crash between them leaves no
+        # orphan — the migration is expand-only and the row has no FK constraint
+        # back to proposals.
+        outbound_id = uuid.uuid4()
+        now = datetime.now(UTC)
+
+        # Raw SQL INSERT — no cross-module ORM model import (module boundary rule).
+        await self._session.execute(
+            text(
+                "INSERT INTO outbound_messages"
+                " (id, tenant_id, contact_id, channel, subject, body, status, created_at)"
+                " VALUES (:id, :tid, :cid, 'email', :subject, :body, 'draft', now())"
+            ),
+            {
+                "id": str(outbound_id),
+                "tid": str(ctx.org_id),
+                "cid": str(proposal.contact_id),
+                "subject": subject,
+                "body": body,
+            },
+        )
+        await self._repo.update_fields(
+            proposal_id,
+            outbound_message_id=outbound_id,
+            status="sent",
+            sent_at=now,
+        )
         await self._session.commit()
 
-        log.info("proposals.sent", proposal_id=str(proposal_id))
-        _log_event(ProposalSent(proposal_id=proposal_id, tenant_id=proposal.tenant_id))
+        # ── Step 2: compliance gate + Celery enqueue (or block) ──────────────
+        # Imported inside method to avoid circular import at module-load time
+        # (same pattern as OutreachService importing the Celery task).
+        from corpmind.modules.outreach.service import OutreachService  # noqa: PLC0415
+
+        send_resp = await OutreachService(self._session).send_message(outbound_id)
+
+        # ── Step 3: audit event + CRM activity (single transaction) ──────────
+        queued = send_resp.status == "queued"
+
+        await self._compliance.record_audit_event(
+            event_type="proposal.delivery_queued" if queued else "proposal.delivery_blocked",
+            outcome="allowed" if queued else "blocked",
+            reason=None if queued else (send_resp.compliance_reason or "compliance"),
+            event_data={
+                "proposal_id": str(proposal_id),
+                "outbound_message_id": str(outbound_id),
+                "contact_id": str(proposal.contact_id),
+            },
+        )
+
+        summary = (
+            "Proposal sent — delivery queued."
+            if queued
+            else f"Proposal send blocked: {send_resp.compliance_reason or 'compliance policy'}."
+        )
+        # Raw SQL INSERT into crm_activities — no cross-module ORM import.
+        await self._session.execute(
+            text(
+                "INSERT INTO crm_activities"
+                " (id, tenant_id, workspace_id, contact_id, type, summary,"
+                "  source_outbound_message_id, created_at)"
+                " VALUES (:id, :tid, :wsid, :cid, 'proposal_sent', :summary, :omid, now())"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "tid": str(ctx.org_id),
+                "wsid": str(proposal.workspace_id),
+                "cid": str(proposal.contact_id),
+                "summary": summary,
+                "omid": str(outbound_id),
+            },
+        )
+        await self._session.commit()
+
+        log.info(
+            "proposals.delivered",
+            proposal_id=str(proposal_id),
+            outbound_message_id=str(outbound_id),
+            delivery_status=send_resp.status,
+        )
+        _log_event(
+            ProposalDeliveryQueued(
+                proposal_id=proposal_id,
+                tenant_id=ctx.org_id,
+                outbound_message_id=outbound_id,
+            )
+            if queued
+            else ProposalDeliveryBlocked(
+                proposal_id=proposal_id,
+                tenant_id=ctx.org_id,
+                outbound_message_id=outbound_id,
+                compliance_reason=send_resp.compliance_reason,
+            )
+        )
 
         proposal.status = "sent"
-        proposal.sent_at = sent_at
-        return ProposalOut.model_validate(proposal)
+        proposal.sent_at = now
+        proposal.outbound_message_id = outbound_id
+        out = ProposalOut.model_validate(proposal)
+        out.delivery_status = send_resp.status
+        return out
 
     # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -297,6 +435,37 @@ class ProposalService:
         if not proposal:
             raise NotFoundError(f"Proposal {proposal_id} not found")
         return proposal
+
+    async def _fetch_contact_email(
+        self, contact_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> str | None:
+        """Raw SQL lookup for contact email — no cross-module ORM import."""
+        result = await self._session.execute(
+            text(
+                "SELECT email FROM hr_contacts"
+                " WHERE id = :cid AND tenant_id = :tid"
+            ),
+            {"cid": str(contact_id), "tid": str(tenant_id)},
+        )
+        row = result.one_or_none()
+        return row[0] if row and row[0] else None
+
+    async def _fetch_delivery_status(
+        self, outbound_message_id: uuid.UUID | None
+    ) -> str | None:
+        """Derive delivery_status from OutboundMessage.status via raw SQL."""
+        if outbound_message_id is None:
+            return None
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            text(
+                "SELECT status FROM outbound_messages"
+                " WHERE id = :mid AND tenant_id = :tid"
+            ),
+            {"mid": str(outbound_message_id), "tid": str(ctx.org_id)},
+        )
+        row = result.one_or_none()
+        return row[0] if row else None
 
 
 def _require_approver_role(ctx: TenantContext) -> None:

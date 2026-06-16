@@ -102,11 +102,11 @@ async def reject_proposal(
 @router.post(
     "/{proposal_id}/send",
     response_model=ProposalOut,
-    summary="Mark a proposal as sent (requires prior approval)",
+    summary="Deliver an approved proposal via email (requires prior approval)",
 )
-async def mark_proposal_sent(
+async def send_proposal(
     proposal_id: uuid.UUID,
     _req: ProposalSendRequest = ProposalSendRequest(),
     session: AsyncSession = Depends(get_session),
 ) -> ProposalOut:
-    return await ProposalService(session).mark_sent(proposal_id)
+    return await ProposalService(session).deliver(proposal_id)

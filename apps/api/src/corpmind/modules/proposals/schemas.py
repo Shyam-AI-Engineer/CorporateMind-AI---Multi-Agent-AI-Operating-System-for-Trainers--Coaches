@@ -29,6 +29,11 @@ class ProposalOut(BaseModel):
     approved_by: uuid.UUID | None
     approved_at: datetime | None
     rejected_reason: str | None
+    # Sprint 12B delivery fields
+    # outbound_message_id: set when deliver() is called; None until then.
+    # delivery_status: derived from OutboundMessage.status; None until delivery initiated.
+    outbound_message_id: uuid.UUID | None = None
+    delivery_status: str | None = None
 
     model_config = {"from_attributes": True}
 

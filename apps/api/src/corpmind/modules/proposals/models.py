@@ -35,3 +35,10 @@ class Proposal(TenantBase):
     approved_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Sprint 12B — delivery tracking (expand step; see migration e4a9b2c7f1d6)
+    # NULL  = delivery not yet initiated.
+    # Set   = deliver() was called; see outbound_messages.status for execution state.
+    outbound_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), nullable=True
+    )

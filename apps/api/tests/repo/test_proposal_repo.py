@@ -521,6 +521,91 @@ class TestProposalRepoListApprovalFilter:
             clear_tenant_context(token_b)
 
 
+# ── ProposalRepo — outbound_message_id (Sprint 12B) ───────────────────────────
+
+class TestProposalRepoOutboundMessageId:
+    @pytest.mark.asyncio
+    async def test_outbound_message_id_null_by_default(self, db_session, tenant_a):
+        """Newly created proposals have outbound_message_id = NULL."""
+        token = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        try:
+            prop = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+            repo = ProposalRepo(db_session)
+            created = await repo.create(prop)
+            await db_session.flush()
+
+            found = await repo.find_by_id(created.id)
+            assert found is not None
+            assert found.outbound_message_id is None
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_outbound_message_id_roundtrip(self, db_session, tenant_a):
+        """update_fields can set outbound_message_id; find_by_id reads it back."""
+        token = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        try:
+            prop = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+            repo = ProposalRepo(db_session)
+            created = await repo.create(prop)
+            await db_session.flush()
+            proposal_id = created.id
+
+            # approval_status must be 'approved' before setting status='sent'
+            # (CHECK constraint). Set both at once.
+            fake_outbound_id = uuid.uuid4()
+            await repo.update_fields(
+                proposal_id,
+                approval_status="approved",
+                outbound_message_id=fake_outbound_id,
+                status="sent",
+                sent_at=datetime.now(UTC),
+            )
+            await db_session.flush()
+
+            db_session.expire(created)
+            found = await repo.find_by_id(proposal_id)
+            assert found is not None
+            assert found.outbound_message_id == fake_outbound_id
+        finally:
+            clear_tenant_context(token)
+
+    @pytest.mark.asyncio
+    async def test_tenant_isolation_outbound_message_id(
+        self, db_session, tenant_a, tenant_b
+    ):
+        """Tenant B cannot read the outbound_message_id set on Tenant A's proposal."""
+        # Write as tenant A
+        token_a = set_tenant_context(tenant_a)
+        await set_rls_tenant(db_session, tenant_a.org_id)
+        prop = _proposal(tenant_a.org_id, tenant_a.workspace_id)
+        repo = ProposalRepo(db_session)
+        created = await repo.create(prop)
+        await db_session.flush()
+        proposal_id = created.id
+        fake_outbound_id = uuid.uuid4()
+        await repo.update_fields(
+            proposal_id,
+            approval_status="approved",
+            outbound_message_id=fake_outbound_id,
+            status="sent",
+            sent_at=datetime.now(UTC),
+        )
+        await db_session.flush()
+        clear_tenant_context(token_a)
+
+        # Read as tenant B — proposal must be invisible
+        token_b = set_tenant_context(tenant_b)
+        await set_rls_tenant(db_session, tenant_b.org_id)
+        try:
+            found = await repo.find_by_id(proposal_id)
+            assert found is None, "Tenant B must not see Tenant A's delivery link"
+        finally:
+            clear_tenant_context(token_b)
+
+
 # ── RLS DB-layer isolation ─────────────────────────────────────────────────────
 
 class TestProposalRepoRLS:

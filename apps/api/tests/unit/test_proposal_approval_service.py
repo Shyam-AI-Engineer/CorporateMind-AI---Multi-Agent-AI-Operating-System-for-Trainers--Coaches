@@ -64,6 +64,7 @@ def _make_proposal(
     p.approved_by = None
     p.approved_at = None
     p.rejected_reason = None
+    p.outbound_message_id = None  # Sprint 12B
     return p
 
 
