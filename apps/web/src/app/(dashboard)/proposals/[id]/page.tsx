@@ -1,23 +1,40 @@
 "use client";
 
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { useProposal, useMarkProposalSent } from "@/features/proposals/api/use-proposals";
-import { ProposalStatusBadge } from "@/features/proposals/ui/proposal-status-badge";
+import { AlertCircle, Send } from "lucide-react";
+import {
+  useApproveProposal,
+  useDeliverProposal,
+  useProposal,
+} from "@/features/proposals/api/use-proposals";
+import {
+  ApprovalStatusBadge,
+  DeliveryStatusBadge,
+  ProposalStatusBadge,
+} from "@/features/proposals/ui/proposal-status-badge";
 import { ProposalContentView } from "@/features/proposals/ui/proposal-content-view";
+import { ProposalRejectDialog } from "@/features/proposals/ui/proposal-reject-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/hooks/use-workspace";
+import { ApiError } from "@/lib/api";
 
 export default function ProposalDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { workspaceId } = useWorkspace();
   const { data: proposal, isLoading, isError } = useProposal(id);
-  const markSent = useMarkProposalSent(workspaceId);
+  const approve = useApproveProposal(workspaceId);
+  const deliver = useDeliverProposal(workspaceId);
+
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [deliverError, setDeliverError] = useState<string | null>(null);
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-4 max-w-3xl">
+      <div className="max-w-3xl space-y-4 p-6">
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-4 w-64" />
         <Skeleton className="h-48 w-full rounded-lg" />
@@ -39,8 +56,38 @@ export default function ProposalDetailPage() {
     );
   }
 
+  const isPendingApproval = proposal.approval_status === "pending_approval";
+  const isApprovedDraft =
+    proposal.approval_status === "approved" && proposal.status === "draft";
+  const isRejected = proposal.approval_status === "rejected";
+  const isDeliveryBlocked = proposal.delivery_status === "blocked";
+
+  async function handleApprove() {
+    setApproveError(null);
+    try {
+      await approve.mutateAsync(proposal!.id);
+    } catch (err) {
+      setApproveError(
+        err instanceof ApiError ? err.message : "Approval failed — please try again.",
+      );
+    }
+  }
+
+  async function handleDeliver() {
+    setDeliverError(null);
+    try {
+      await deliver.mutateAsync(proposal!.id);
+    } catch (err) {
+      setDeliverError(
+        err instanceof ApiError
+          ? err.message
+          : "Delivery failed — please try again.",
+      );
+    }
+  }
+
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
+    <div className="max-w-3xl space-y-6 p-6">
       {/* Breadcrumb */}
       <div className="text-xs text-muted-foreground">
         <Link href="/proposals" className="hover:underline">
@@ -52,41 +99,99 @@ export default function ProposalDetailPage() {
 
       {/* Header */}
       <div className="flex flex-wrap items-start gap-3">
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold leading-snug">{proposal.title}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Contact {proposal.contact_id.slice(0, 8)}…
           </p>
         </div>
-        <ProposalStatusBadge status={proposal.status} />
+        <div className="flex items-center gap-2">
+          <ProposalStatusBadge status={proposal.status} />
+          <ApprovalStatusBadge status={proposal.approval_status} />
+        </div>
       </div>
 
-      {/* Metadata row */}
+      {/* Metadata grid */}
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border p-4 text-sm sm:grid-cols-3">
-        {[
-          { label: "Status",  value: <ProposalStatusBadge status={proposal.status} /> },
-          { label: "Created", value: new Date(proposal.created_at).toLocaleString() },
-          { label: "Sent at", value: proposal.sent_at ? new Date(proposal.sent_at).toLocaleString() : "—" },
-        ].map(({ label, value }) => (
-          <div key={label}>
-            <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="mt-0.5 font-medium">{value}</dd>
-          </div>
-        ))}
+        <MetaCell label="Approval">
+          <ApprovalStatusBadge status={proposal.approval_status} />
+        </MetaCell>
+        <MetaCell label="Delivery">
+          <DeliveryStatusBadge status={proposal.delivery_status} />
+        </MetaCell>
+        <MetaCell label="Created">
+          {new Date(proposal.created_at).toLocaleString()}
+        </MetaCell>
+        <MetaCell label="Sent at">
+          {proposal.sent_at ? new Date(proposal.sent_at).toLocaleString() : "—"}
+        </MetaCell>
+        {proposal.approved_at && (
+          <MetaCell label="Approved at">
+            {new Date(proposal.approved_at).toLocaleString()}
+          </MetaCell>
+        )}
+        {proposal.approved_by && (
+          <MetaCell label="Approved by">
+            {proposal.approved_by.slice(0, 8)}…
+          </MetaCell>
+        )}
+        {isRejected && proposal.rejected_reason && (
+          <MetaCell label="Rejection reason" className="col-span-2 sm:col-span-3">
+            <span className="text-destructive">{proposal.rejected_reason}</span>
+          </MetaCell>
+        )}
       </dl>
 
-      {/* Mark as sent action */}
-      {proposal.status === "draft" && (
-        <div className="flex items-center gap-3">
+      {/* Compliance block callout */}
+      {isDeliveryBlocked && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Delivery blocked by compliance</p>
+            <p className="mt-0.5 text-xs">
+              This proposal was flagged before sending. Contact your compliance
+              administrator for details.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Action bar */}
+      {isPendingApproval && (
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             size="sm"
-            disabled={markSent.isPending}
-            onClick={() => markSent.mutate(proposal.id)}
+            disabled={approve.isPending}
+            onClick={() => void handleApprove()}
           >
-            {markSent.isPending ? "Marking…" : "Mark as sent"}
+            {approve.isPending ? "Approving…" : "Approve"}
           </Button>
-          {markSent.isError && (
-            <p className="text-xs text-destructive">Failed — please try again.</p>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={approve.isPending}
+            onClick={() => setRejectOpen(true)}
+          >
+            Reject
+          </Button>
+          {approveError && (
+            <p className="text-xs text-destructive">{approveError}</p>
+          )}
+        </div>
+      )}
+
+      {isApprovedDraft && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            disabled={deliver.isPending}
+            onClick={() => void handleDeliver()}
+          >
+            <Send className="mr-1.5 h-3.5 w-3.5" />
+            {deliver.isPending ? "Sending…" : "Send proposal"}
+          </Button>
+          {deliverError && (
+            <p className="text-xs text-destructive">{deliverError}</p>
           )}
         </div>
       )}
@@ -96,6 +201,31 @@ export default function ProposalDetailPage() {
         <h2 className="text-sm font-semibold">Proposal content</h2>
         <ProposalContentView proposal={proposal} />
       </div>
+
+      {/* Reject dialog — mounted at top level so it survives re-renders */}
+      <ProposalRejectDialog
+        proposalId={proposal.id}
+        workspaceId={workspaceId}
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+      />
+    </div>
+  );
+}
+
+function MetaCell({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 font-medium">{children}</dd>
     </div>
   );
 }

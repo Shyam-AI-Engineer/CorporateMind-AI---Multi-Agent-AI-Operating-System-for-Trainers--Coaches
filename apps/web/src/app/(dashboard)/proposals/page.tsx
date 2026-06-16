@@ -12,6 +12,9 @@ export default function ProposalsPage() {
   const { workspaceId } = useWorkspace();
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [approvalStatus, setApprovalStatus] = useState<string | undefined>(
+    undefined,
+  );
 
   if (!workspaceId) {
     return (
@@ -22,7 +25,7 @@ export default function ProposalsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Proposals</h1>
@@ -35,6 +38,8 @@ export default function ProposalsPage() {
 
       <ProposalList
         workspaceId={workspaceId}
+        approvalStatus={approvalStatus}
+        onFilterChange={setApprovalStatus}
         onGenerate={() => setDialogOpen(true)}
       />
 
