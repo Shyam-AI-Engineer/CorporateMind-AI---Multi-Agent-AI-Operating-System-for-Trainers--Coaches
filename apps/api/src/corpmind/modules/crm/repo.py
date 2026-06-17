@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from corpmind.core.tenancy import get_tenant_context
 from corpmind.modules.crm.models import (
     Activity,
+    BookingWebhookEvent,
     FollowUpTask,
     InboxMessageAutomationLog,
     Lead,
@@ -507,6 +508,94 @@ class AutomationLogRepo:
             select(InboxMessageAutomationLog).where(
                 InboxMessageAutomationLog.inbox_message_id == inbox_message_id,
                 InboxMessageAutomationLog.tenant_id == ctx.org_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+
+# ── BookingWebhookEventRepo (Sprint 14 — ADR-0009) ───────────────────────────
+
+class BookingWebhookEventRepo:
+    """Idempotency anchor for inbound booking webhook events.
+
+    UNIQUE(tenant_id, provider, provider_event_id) prevents double-processing
+    when a booking tool retries a webhook.  The reserve() call is the exclusive
+    gate: only the first caller for a given (provider, event_id) pair gets True.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def reserve(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        provider: str,
+        provider_event_id: str,
+        event_type: str,
+        invitee_email: str,
+        scheduled_at: datetime | None,
+        raw_payload: dict,  # type: ignore[type-arg]
+    ) -> uuid.UUID | None:
+        """Atomically claim this (provider, provider_event_id) for processing.
+
+        Returns the new event row's UUID when inserted for the first time.
+        Returns None when ON CONFLICT DO NOTHING fired (already processed).
+        Initial outcome is 'processing'; caller updates via mark_outcome().
+        """
+        event_id = uuid.uuid4()
+        stmt = (
+            pg_insert(BookingWebhookEvent)
+            .values(
+                id=event_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                provider=provider,
+                provider_event_id=provider_event_id,
+                event_type=event_type,
+                invitee_email=invitee_email.lower(),
+                scheduled_at=scheduled_at,
+                raw_payload=raw_payload,
+                outcome="processing",
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_booking_webhook_events_tenant_provider_event"
+            )
+        )
+        result = await self._session.execute(stmt)
+        return event_id if result.rowcount > 0 else None  # type: ignore[union-attr]
+
+    async def mark_outcome(
+        self,
+        event_id: uuid.UUID,
+        *,
+        outcome: str,
+        lead_id: uuid.UUID | None = None,
+    ) -> None:
+        """Update the event row with the processing outcome and optional matched lead."""
+        from datetime import UTC
+
+        values: dict[str, object] = {
+            "outcome": outcome,
+            "processed_at": datetime.now(UTC),
+        }
+        if lead_id is not None:
+            values["lead_id"] = lead_id
+        await self._session.execute(
+            update(BookingWebhookEvent)
+            .where(BookingWebhookEvent.id == event_id)
+            .values(**values)
+        )
+
+    async def find_by_provider_event(
+        self, *, tenant_id: uuid.UUID, provider: str, provider_event_id: str
+    ) -> BookingWebhookEvent | None:
+        result = await self._session.execute(
+            select(BookingWebhookEvent).where(
+                BookingWebhookEvent.tenant_id == tenant_id,
+                BookingWebhookEvent.provider == provider,
+                BookingWebhookEvent.provider_event_id == provider_event_id,
             )
         )
         return result.scalar_one_or_none()

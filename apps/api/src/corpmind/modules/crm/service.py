@@ -17,16 +17,28 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationError
 from corpmind.core.tenancy import get_tenant_context
-from corpmind.modules.crm.events import LeadStageChanged, MeetingBooked
-from corpmind.modules.crm.models import Lead
-from corpmind.modules.crm.repo import ActivityRepo, FollowUpTaskRepo, LeadRepo
+from corpmind.modules.crm.events import (
+    BookingWebhookReceived,
+    LeadStageChanged,
+    MeetingAutoScheduled,
+    MeetingBooked,
+)
+from corpmind.modules.crm.models import Activity, Lead
+from corpmind.modules.crm.repo import (
+    ActivityRepo,
+    BookingWebhookEventRepo,
+    FollowUpTaskRepo,
+    LeadRepo,
+)
 from corpmind.modules.crm.schemas import (
     ActivityListOut,
     ActivityOut,
+    BookingWebhookPayload,
     FollowUpTaskListOut,
     FollowUpTaskOut,
     LeadCreate,
@@ -245,6 +257,122 @@ class CRMService:
         await self._repo.update_fields(lead_id, meeting_scheduled_at=meeting_at)
         await self._session.commit()
         return response
+
+    # ── Booking webhook automation (Sprint 14 — ADR-0009) ────────────────────
+
+    async def process_booking_event(
+        self,
+        workspace_id: uuid.UUID,
+        payload: BookingWebhookPayload,
+    ) -> None:
+        """Process a verified inbound booking webhook event.
+
+        Idempotency: BookingWebhookEventRepo.reserve() inserts a row with
+        UNIQUE(tenant_id, provider, provider_event_id); duplicates return early.
+
+        Contact matching: cross-module read via raw SQL (module boundary rule
+        forbids importing hr_discovery.repo / hr_discovery.models directly).
+        """
+        ctx = get_tenant_context()
+        booking_repo = BookingWebhookEventRepo(self._session)
+
+        _log_event(BookingWebhookReceived(
+            workspace_id=workspace_id,
+            tenant_id=ctx.org_id,
+            provider=payload.provider,
+            provider_event_id=payload.provider_event_id,
+            event_type=payload.event_type,
+        ))
+
+        event_id = await booking_repo.reserve(
+            tenant_id=ctx.org_id,
+            workspace_id=workspace_id,
+            provider=payload.provider,
+            provider_event_id=payload.provider_event_id,
+            event_type=payload.event_type,
+            invitee_email=payload.invitee_email,
+            scheduled_at=payload.scheduled_at,
+            raw_payload=payload.model_dump(mode="json"),
+        )
+        if event_id is None:
+            log.info(
+                "booking_webhook.duplicate",
+                provider=payload.provider,
+                provider_event_id=payload.provider_event_id,
+            )
+            return
+
+        if payload.event_type not in {"booking.created", "booking.rescheduled"}:
+            await booking_repo.mark_outcome(event_id, outcome="skipped")
+            log.info("booking_webhook.skipped_type", event_type=payload.event_type)
+            return
+
+        # Cross-module: find HR contact by invitee email (raw SQL).
+        result = await self._session.execute(
+            text(
+                "SELECT id FROM hr_contacts "
+                "WHERE tenant_id = :tid AND lower(email) = lower(:email) "
+                "LIMIT 1"
+            ),
+            {"tid": str(ctx.org_id), "email": payload.invitee_email},
+        )
+        row = result.first()
+        if not row:
+            await booking_repo.mark_outcome(event_id, outcome="skipped")
+            log.info(
+                "booking_webhook.contact_not_found",
+                provider_event_id=payload.provider_event_id,
+            )
+            return
+        contact_id: uuid.UUID = uuid.UUID(str(row[0]))
+
+        lead = await self._repo.find_active_by_contact_any_workspace(contact_id)
+        if not lead:
+            await booking_repo.mark_outcome(event_id, outcome="skipped")
+            log.info(
+                "booking_webhook.no_active_lead",
+                contact_id=str(contact_id),
+            )
+            return
+
+        await self._repo.update_fields(
+            lead.id,
+            meeting_scheduled_at=payload.scheduled_at,
+            booking_provider_event_id=payload.provider_event_id,
+        )
+
+        scheduled_label = (
+            payload.scheduled_at.strftime("%b %d, %Y at %I:%M %p")
+            if payload.scheduled_at
+            else "time TBD"
+        )
+        activity = Activity(
+            tenant_id=ctx.org_id,
+            workspace_id=lead.workspace_id,
+            lead_id=lead.id,
+            contact_id=contact_id,
+            type="booking_confirmed",
+            summary=f"Meeting auto-scheduled via {payload.provider} for {scheduled_label}",
+        )
+        await ActivityRepo(self._session).create(activity)
+
+        await booking_repo.mark_outcome(event_id, outcome="applied", lead_id=lead.id)
+
+        _log_event(MeetingAutoScheduled(
+            lead_id=lead.id,
+            tenant_id=ctx.org_id,
+            contact_id=contact_id,
+            scheduled_at=payload.scheduled_at,
+            provider=payload.provider,
+            provider_event_id=payload.provider_event_id,
+        ))
+
+        log.info(
+            "booking_webhook.applied",
+            lead_id=str(lead.id),
+            provider=payload.provider,
+            provider_event_id=payload.provider_event_id,
+        )
 
     # ── Activity + follow-up read surface (Sprint 5 prerequisite) ─────────────
 

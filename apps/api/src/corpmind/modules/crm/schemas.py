@@ -181,3 +181,48 @@ class FollowupApproveResponse(BaseModel):
     task_id: uuid.UUID
     status: str  # done | blocked
     compliance_reason: str | None = None
+
+
+# ── Sprint 14: Booking webhook (ADR-0009) ─────────────────────────────────────
+
+class BookingWebhookPayload(BaseModel):
+    """Normalised inbound booking event.
+
+    Trainers configure their booking tool (Calendly, Cal.com, etc.) to POST
+    this shape to /api/v1/webhooks/booking/{workspace_id}.  Provider-specific
+    fields are captured in `metadata` so nothing is lost.
+    """
+
+    provider: str  # calendly | cal_com | tidycal | generic
+    provider_event_id: str  # unique event ID from the booking tool
+    event_type: str  # booking.created | booking.cancelled | booking.rescheduled
+    invitee_email: str
+    invitee_name: str | None = None
+    scheduled_at: datetime | None = None
+    metadata: dict[str, Any] = {}
+
+
+class BookingWebhookEventOut(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    provider: str
+    provider_event_id: str
+    event_type: str
+    invitee_email: str
+    scheduled_at: datetime | None
+    outcome: str
+    lead_id: uuid.UUID | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Sprint 14: Workspace booking settings ─────────────────────────────────────
+
+class WorkspaceBookingWebhookOut(BaseModel):
+    workspace_id: uuid.UUID
+    webhook_url: str
+    has_secret: bool
+    # Secret is returned on GET so trainers can copy it; visible only to OrgAdmins.
+    # Treat like a password — display once, can be regenerated at any time.
+    secret: str | None = None

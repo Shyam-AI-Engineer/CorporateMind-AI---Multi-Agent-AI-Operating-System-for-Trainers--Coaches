@@ -24,7 +24,7 @@ from corpmind.modules.hr_discovery.models import Company, HRContact  # noqa: F40
 from corpmind.modules.social.models import SocialPost  # noqa: F401
 from corpmind.modules.whatsapp.models import WhatsAppTemplate, WhatsAppSession  # noqa: F401
 from corpmind.modules.proposals.models import Proposal  # noqa: F401
-from corpmind.modules.crm.models import Lead  # noqa: F401
+from corpmind.modules.crm.models import Lead, BookingWebhookEvent  # noqa: F401
 from corpmind.modules.analytics.models import AnalyticsDaily  # noqa: F401
 from corpmind.modules.billing.models import Subscription, UsageMeter  # noqa: F401
 from corpmind.ai.models import ModelRun  # noqa: F401

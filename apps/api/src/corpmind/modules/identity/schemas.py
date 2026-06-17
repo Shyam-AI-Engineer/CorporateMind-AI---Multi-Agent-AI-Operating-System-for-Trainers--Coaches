@@ -51,3 +51,14 @@ class OrgOut(BaseModel):
     is_active: bool
 
     model_config = {"from_attributes": True}
+
+
+# ── Sprint 14: workspace booking-webhook settings ─────────────────────────────
+
+class WorkspaceBookingWebhookOut(BaseModel):
+    workspace_id: uuid.UUID
+    webhook_url: str
+    has_secret: bool
+    # The secret is returned so the trainer can copy it into their booking tool.
+    # Only visible to authenticated OrgAdmins; never logged.
+    secret: str | None = None

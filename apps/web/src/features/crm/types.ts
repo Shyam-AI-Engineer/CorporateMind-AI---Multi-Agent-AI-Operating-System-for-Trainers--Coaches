@@ -148,6 +148,9 @@ export const ACTIVITY_CONFIG: Record<
   automation_skipped:       { label: "Automation skipped",  icon: "alert-triangle" },
   followup_approved:        { label: "Follow-up approved",  icon: "mail" },
   followup_rejected:        { label: "Follow-up rejected",  icon: "mail-x" },
+  // Sprint 14 — booking webhook activities
+  booking_confirmed:        { label: "Meeting auto-scheduled", icon: "trending-up" },
+  meeting_rescheduled:      { label: "Meeting rescheduled",    icon: "clock" },
 };
 
 export const FOLLOW_UP_STATUS_CONFIG: Record<

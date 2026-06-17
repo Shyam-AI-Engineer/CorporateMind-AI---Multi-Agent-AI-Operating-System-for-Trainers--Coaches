@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.core.database import get_public_session, get_session
@@ -13,6 +13,7 @@ from corpmind.modules.identity.schemas import (
     RegisterRequest,
     TokenResponse,
     UserOut,
+    WorkspaceBookingWebhookOut,
 )
 from corpmind.modules.identity.service import IdentityService
 
@@ -60,3 +61,97 @@ async def me(
         from corpmind.core.exceptions import NotFoundError
         raise NotFoundError("User not found")
     return UserOut.model_validate(user)
+
+
+# ── Sprint 14: workspace booking-webhook settings ─────────────────────────────
+
+@router.get(
+    "/workspace/booking-webhook",
+    response_model=WorkspaceBookingWebhookOut,
+    summary="Get the booking webhook URL and secret for this workspace",
+)
+async def get_booking_webhook(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> WorkspaceBookingWebhookOut:
+    """Return the booking webhook URL and the current HMAC secret.
+
+    The trainer copies both into their booking tool (Calendly, Cal.com, etc.).
+    The secret is returned in full so the trainer can view/copy it at any time.
+    Regenerate it via the /regenerate endpoint to rotate.
+    """
+    from corpmind.core.tenancy import get_tenant_context
+    from sqlalchemy import select as sa_select
+
+    from corpmind.modules.identity.models import Workspace
+
+    ctx = get_tenant_context()
+    result = await session.execute(
+        sa_select(Workspace).where(Workspace.id == ctx.workspace_id)
+    )
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        from corpmind.core.exceptions import NotFoundError
+        raise NotFoundError("Workspace not found")
+
+    webhook_url = (
+        f"{str(request.base_url).rstrip('/')}"
+        f"/api/v1/webhooks/booking/{ctx.workspace_id}"
+    )
+    return WorkspaceBookingWebhookOut(
+        workspace_id=ctx.workspace_id,
+        webhook_url=webhook_url,
+        has_secret=workspace.booking_webhook_secret is not None,
+        secret=workspace.booking_webhook_secret,
+    )
+
+
+@router.post(
+    "/workspace/booking-webhook/regenerate",
+    response_model=WorkspaceBookingWebhookOut,
+    summary="Rotate the booking webhook secret (invalidates any existing secret)",
+)
+async def regenerate_booking_webhook_secret(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> WorkspaceBookingWebhookOut:
+    """Generate a new HMAC-SHA256 secret for the booking webhook.
+
+    The previous secret is immediately invalidated — update your booking tool
+    before regenerating if there are active webhook subscriptions.
+    """
+    import secrets as _secrets
+
+    from corpmind.core.tenancy import get_tenant_context
+    from sqlalchemy import select as sa_select, update as sa_update
+
+    from corpmind.modules.identity.models import Workspace
+
+    ctx = get_tenant_context()
+    new_secret = _secrets.token_urlsafe(32)
+
+    await session.execute(
+        sa_update(Workspace)
+        .where(Workspace.id == ctx.workspace_id)
+        .values(booking_webhook_secret=new_secret)
+    )
+
+    # Re-fetch to confirm write before returning
+    result = await session.execute(
+        sa_select(Workspace).where(Workspace.id == ctx.workspace_id)
+    )
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        from corpmind.core.exceptions import NotFoundError
+        raise NotFoundError("Workspace not found")
+
+    webhook_url = (
+        f"{str(request.base_url).rstrip('/')}"
+        f"/api/v1/webhooks/booking/{ctx.workspace_id}"
+    )
+    return WorkspaceBookingWebhookOut(
+        workspace_id=ctx.workspace_id,
+        webhook_url=webhook_url,
+        has_secret=True,
+        secret=new_secret,
+    )

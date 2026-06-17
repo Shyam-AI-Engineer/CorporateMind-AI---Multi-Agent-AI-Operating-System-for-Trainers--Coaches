@@ -13,7 +13,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PgUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from corpmind.core.database import TenantBase
@@ -34,6 +35,9 @@ class Lead(TenantBase):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     meeting_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     booked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Sprint 14: provider_event_id from booking webhook that set meeting_scheduled_at.
+    # NULL for manually-entered times via the UI.
+    booking_provider_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -142,6 +146,51 @@ class FollowUpTask(TenantBase):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BookingWebhookEvent(TenantBase):
+    """Idempotency anchor for inbound booking webhook events (ADR-0009).
+
+    UNIQUE(tenant_id, provider, provider_event_id) prevents double-processing
+    of retried webhooks.  outcome vocabulary (app-controlled string):
+      processing | applied | skipped | failed
+    'applied' means the CRM lead was updated.
+    'skipped' means the event arrived but no CRM action was taken
+              (contact not found, no active lead, unrecognised event type).
+    'failed'  means processing threw an unexpected error.
+    """
+
+    __tablename__ = "booking_webhook_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "provider",
+            "provider_event_id",
+            name="uq_booking_webhook_events_tenant_provider_event",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    # Provider name: calendly | cal_com | tidycal | savvycal | generic
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Event type from the booking tool: booking.created | booking.cancelled | booking.rescheduled
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    invitee_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(50), default="processing", nullable=False)
+    # Set to the matched CRM lead when outcome='applied'
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), nullable=True, index=True
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
 

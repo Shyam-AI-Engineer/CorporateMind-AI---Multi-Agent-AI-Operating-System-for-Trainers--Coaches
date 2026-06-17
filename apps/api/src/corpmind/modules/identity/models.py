@@ -42,6 +42,9 @@ class Workspace(Base):
     default_language: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Sprint 14 (d4e2f7a8b3c1): HMAC-SHA256 shared secret for the booking webhook.
+    # NULL means the trainer has not yet generated a secret (webhook is unconfigured).
+    booking_webhook_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     org: Mapped[Org] = relationship("Org", back_populates="workspaces")

@@ -97,6 +97,35 @@ class ContactBounced:
 
 
 @dataclass(frozen=True)
+class BookingWebhookReceived:
+    """Emitted when a booking webhook payload passes HMAC verification.
+
+    Fired before contact matching — even skipped events emit this so dashboards
+    can track raw inbound webhook volume vs. applied rate.
+    """
+
+    workspace_id: uuid.UUID
+    tenant_id: uuid.UUID
+    provider: str
+    provider_event_id: str
+    event_type: str
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class MeetingAutoScheduled:
+    """Emitted when a booking webhook successfully sets meeting_scheduled_at on a lead."""
+
+    lead_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    scheduled_at: datetime | None
+    provider: str
+    provider_event_id: str
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
 class AutomationFailed:
     """Emitted when a validation gate prevented any CRM mutation.
 
