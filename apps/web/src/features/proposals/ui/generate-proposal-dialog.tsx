@@ -22,6 +22,8 @@ interface GenerateProposalDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: (proposalId: string) => void;
+  /** Pre-select this lead in the picker (used from the lead detail page). */
+  initialLeadId?: string;
 }
 
 export function GenerateProposalDialog({
@@ -29,8 +31,9 @@ export function GenerateProposalDialog({
   open,
   onOpenChange,
   onSuccess,
+  initialLeadId,
 }: GenerateProposalDialogProps) {
-  const [leadId, setLeadId] = useState("");
+  const [leadId, setLeadId] = useState(initialLeadId ?? "");
   const { leadsByStage, isLoading: leadsLoading } = usePipelineLeads(workspaceId);
   const { mutate, isPending, error } = useGenerateProposal(workspaceId);
 

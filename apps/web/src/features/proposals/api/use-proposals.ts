@@ -88,3 +88,22 @@ export function useDeliverProposal(workspaceId: string | null | undefined) {
     onSuccess: (_, proposalId) => invalidate(proposalId),
   });
 }
+
+export function useProposalsForContact(
+  workspaceId: string | null | undefined,
+  contactId: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: ["proposals", "by-contact", workspaceId, contactId] as const,
+    queryFn: () => {
+      const params = new URLSearchParams({
+        workspace_id: workspaceId!,
+        contact_id: contactId!,
+        limit: "20",
+      });
+      return api.get<ProposalListOut>(`/api/v1/proposals/?${params.toString()}`);
+    },
+    enabled: !!workspaceId && !!contactId,
+    staleTime: 30 * 1000,
+  });
+}

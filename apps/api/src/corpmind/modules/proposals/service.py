@@ -148,12 +148,21 @@ class ProposalService:
         limit: int = 50,
         offset: int = 0,
         approval_status: str | None = None,
+        contact_id: uuid.UUID | None = None,
     ) -> ProposalListOut:
         proposals, total = await asyncio.gather(
             self._repo.list_by_workspace(
-                workspace_id, limit=limit, offset=offset, approval_status=approval_status
+                workspace_id,
+                limit=limit,
+                offset=offset,
+                approval_status=approval_status,
+                contact_id=contact_id,
             ),
-            self._repo.count_by_workspace(workspace_id, approval_status=approval_status),
+            self._repo.count_by_workspace(
+                workspace_id,
+                approval_status=approval_status,
+                contact_id=contact_id,
+            ),
         )
         items: list[ProposalOut] = []
         for p in proposals:

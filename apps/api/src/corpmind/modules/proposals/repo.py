@@ -51,6 +51,7 @@ class ProposalRepo:
         limit: int = 50,
         offset: int = 0,
         approval_status: str | None = None,
+        contact_id: uuid.UUID | None = None,
     ) -> list[Proposal]:
         ctx = get_tenant_context()
         stmt = (
@@ -65,6 +66,8 @@ class ProposalRepo:
         )
         if approval_status is not None:
             stmt = stmt.where(Proposal.approval_status == approval_status)
+        if contact_id is not None:
+            stmt = stmt.where(Proposal.contact_id == contact_id)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -73,6 +76,7 @@ class ProposalRepo:
         workspace_id: uuid.UUID,
         *,
         approval_status: str | None = None,
+        contact_id: uuid.UUID | None = None,
     ) -> int:
         ctx = get_tenant_context()
         stmt = (
@@ -85,6 +89,8 @@ class ProposalRepo:
         )
         if approval_status is not None:
             stmt = stmt.where(Proposal.approval_status == approval_status)
+        if contact_id is not None:
+            stmt = stmt.where(Proposal.contact_id == contact_id)
         result = await self._session.execute(stmt)
         return result.scalar_one()
 

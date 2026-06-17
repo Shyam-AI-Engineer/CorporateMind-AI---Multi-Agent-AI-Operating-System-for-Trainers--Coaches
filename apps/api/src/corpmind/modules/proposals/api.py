@@ -46,6 +46,7 @@ async def list_proposals(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     approval_status: str | None = Query(default=None),
+    contact_id: uuid.UUID | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> ProposalListOut:
     validated_status: str | None = None
@@ -58,7 +59,11 @@ async def list_proposals(
         validated_status = approval_status
 
     return await ProposalService(session).list_proposals(
-        workspace_id, limit=limit, offset=offset, approval_status=validated_status
+        workspace_id,
+        limit=limit,
+        offset=offset,
+        approval_status=validated_status,
+        contact_id=contact_id,
     )
 
 

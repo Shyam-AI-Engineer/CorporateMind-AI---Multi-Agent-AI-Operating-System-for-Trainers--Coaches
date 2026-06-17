@@ -7,6 +7,7 @@ import { PIPELINE_STAGES } from "@/features/crm/types";
 
 const LEADS_KEY = (workspaceId: string) => ["crm", "leads", workspaceId] as const;
 const STATS_KEY = (workspaceId: string) => ["crm", "stats", workspaceId] as const;
+const LEAD_KEY = (leadId: string) => ["crm", "lead", leadId] as const;
 
 export function usePipelineLeads(workspaceId: string | null | undefined) {
   const query = useQuery({
@@ -64,6 +65,30 @@ export function useCreateLead(workspaceId: string | null | undefined) {
       if (workspaceId) {
         void queryClient.invalidateQueries({ queryKey: LEADS_KEY(workspaceId) });
         void queryClient.invalidateQueries({ queryKey: STATS_KEY(workspaceId) });
+      }
+    },
+  });
+}
+
+export function useGetLead(leadId: string | null | undefined) {
+  return useQuery({
+    queryKey: LEAD_KEY(leadId ?? ""),
+    queryFn: () => api.get<Lead>(`/api/v1/crm/${leadId}`),
+    enabled: !!leadId,
+    staleTime: 20 * 1000,
+  });
+}
+
+export function useScheduleMeeting(workspaceId: string | null | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, meetingAt }: { leadId: string; meetingAt: string }) =>
+      api.patch<Lead>(`/api/v1/crm/${leadId}/meeting`, { meeting_at: meetingAt }),
+    onSuccess: (data) => {
+      // Update the detail cache immediately so the page reflects the new time.
+      queryClient.setQueryData(LEAD_KEY(data.id), data);
+      if (workspaceId) {
+        void queryClient.invalidateQueries({ queryKey: LEADS_KEY(workspaceId) });
       }
     },
   });
