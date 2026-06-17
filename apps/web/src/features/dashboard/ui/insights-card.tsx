@@ -1,32 +1,86 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useAnalyticsSummary } from "@/features/analytics/api/use-analytics";
+
+function StatRow({
+  label,
+  value,
+  isLoading,
+}: {
+  label: string;
+  value: string;
+  isLoading: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between py-1.5 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      {isLoading ? (
+        <Skeleton className="h-4 w-12" />
+      ) : (
+        <span className="font-semibold tabular-nums">{value}</span>
+      )}
+    </div>
+  );
+}
 
 export function InsightsCard() {
+  const { data, isLoading, isError } = useAnalyticsSummary(30);
+
+  const replyRatePct = data ? `${(data.reply_rate * 100).toFixed(1)}%` : "—";
+  const bookingRatePct = data ? `${(data.booking_rate * 100).toFixed(1)}%` : "—";
+  const approvalRatePct = data
+    ? `${(data.proposal_approval_rate * 100).toFixed(0)}%`
+    : "—";
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-semibold text-foreground">
-          AI Insights
-        </CardTitle>
+      <CardHeader className="flex flex-row items-center gap-2 pb-2">
+        <TrendingUp className="h-4 w-4 text-primary" />
+        <CardTitle className="text-sm font-semibold">30-Day Performance</CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-muted/30 py-8 text-center">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-100">
-            <Sparkles className="h-5 w-5 text-violet-600" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">AI Insights — Phase 2</p>
-            <p className="max-w-xs text-xs text-muted-foreground">
-              The AnalyticsAgent will surface nudges, wins, and anomalies here
-              once your first campaign completes.
-            </p>
-          </div>
-          <Badge variant="secondary" className="text-xs">
-            Coming in Phase 2
-          </Badge>
+      <CardContent className="space-y-0.5">
+        {isError ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">
+            Analytics unavailable — check back after your first nightly rollup.
+          </p>
+        ) : (
+          <>
+            <StatRow label="Reply rate" value={replyRatePct} isLoading={isLoading} />
+            <StatRow
+              label="Outreach sent"
+              value={data ? data.total_sent.toLocaleString() : "—"}
+              isLoading={isLoading}
+            />
+            <StatRow
+              label="Meetings scheduled"
+              value={data ? String(data.meetings_scheduled) : "—"}
+              isLoading={isLoading}
+            />
+            <StatRow
+              label="Proposals sent"
+              value={data ? String(data.proposals_sent) : "—"}
+              isLoading={isLoading}
+            />
+            <StatRow
+              label="Approval rate"
+              value={approvalRatePct}
+              isLoading={isLoading}
+            />
+            <StatRow label="Close rate" value={bookingRatePct} isLoading={isLoading} />
+          </>
+        )}
+        <div className="pt-3">
+          <Link
+            href="/analytics"
+            className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          >
+            View full analytics
+            <ArrowRight className="h-3 w-3" />
+          </Link>
         </div>
       </CardContent>
     </Card>

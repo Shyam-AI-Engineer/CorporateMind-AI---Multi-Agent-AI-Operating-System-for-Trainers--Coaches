@@ -16,6 +16,7 @@ import {
   Zap,
   UserCircle,
   Mail,
+  BarChart2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/outreach",   label: "Outreach",        icon: Send },
   { href: "/hr",         label: "HR Contacts",     icon: Users },
   { href: "/proposals",  label: "Proposals",       icon: FileText },
+  { href: "/analytics",  label: "Analytics",       icon: BarChart2 },
   { href: "/social",     label: "Social",          icon: Share2, soon: true },
 ];
 

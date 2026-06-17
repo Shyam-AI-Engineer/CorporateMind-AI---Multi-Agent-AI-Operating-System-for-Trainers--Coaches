@@ -14,28 +14,38 @@ from corpmind.workers.tasks.analytics import (
 # ── compute_daily_rollup ───────────────────────────────────────────────────────
 
 class TestComputeDailyRollup:
-    def test_returns_none(self):
+    def test_returns_dict_with_rollup_date(self):
+        """Task now fans out and returns a summary dict, not None."""
         result = compute_daily_rollup.run()
-        assert result is None
+        assert isinstance(result, dict)
+        assert "rollup_date" in result
+        assert "enqueued" in result
+        assert "failed" in result
 
-    def test_logs_start_event(self):
+    def test_logs_start_event_as_first_call(self):
+        """First log call must be the start event with the date kwarg."""
         with patch("corpmind.workers.tasks.analytics.log") as mock_log:
             compute_daily_rollup.run()
-        mock_log.info.assert_called_once()
-        assert mock_log.info.call_args.args[0] == "analytics.daily_rollup.start"
+        # info is called at least once (start) — may also log fan_out_complete
+        assert mock_log.info.call_count >= 1
+        first_call = mock_log.info.call_args_list[0]
+        assert first_call.args[0] == "analytics.daily_rollup.start"
 
-    def test_log_includes_date_kwarg(self):
+    def test_log_date_kwarg_is_string(self):
+        """The 'date' kwarg in the start log must be a YYYY-MM-DD string."""
         with patch("corpmind.workers.tasks.analytics.log") as mock_log:
             compute_daily_rollup.run()
-        call_kwargs = mock_log.info.call_args.kwargs
-        assert "date" in call_kwargs
-
-    def test_log_date_is_string(self):
-        with patch("corpmind.workers.tasks.analytics.log") as mock_log:
-            compute_daily_rollup.run()
-        date_val = mock_log.info.call_args.kwargs["date"]
+        first_call = mock_log.info.call_args_list[0]
+        date_val = first_call.kwargs["date"]
         assert isinstance(date_val, str)
         assert len(date_val) == 10  # YYYY-MM-DD
+
+    def test_rollup_date_is_yesterday(self):
+        """Rollup date in the returned dict is yesterday's date string."""
+        from datetime import date, timedelta
+        yesterday = str(date.today() - timedelta(days=1))
+        result = compute_daily_rollup.run()
+        assert result["rollup_date"] == yesterday
 
 
 # ── run_campaign_optimizer ─────────────────────────────────────────────────────
