@@ -17,7 +17,6 @@ from email.mime.text import MIMEText
 
 import aiosmtplib
 import structlog
-from prometheus_client import Counter, Histogram
 from starlette.datastructures import Headers
 
 from corpmind.channels.base import (
@@ -26,20 +25,11 @@ from corpmind.channels.base import (
     OutboundMessage,
     SendResult,
 )
+from corpmind.channels.metrics import channel_send_latency_seconds as _send_latency
+from corpmind.channels.metrics import channel_send_total as _send_total
 from corpmind.core.config import settings
 
 log = structlog.get_logger(__name__)
-
-_send_total = Counter(
-    "channel_send_total",
-    "Total send attempts per channel",
-    ["channel", "status"],
-)
-_send_latency = Histogram(
-    "channel_send_latency_seconds",
-    "Outbound send latency per channel",
-    ["channel"],
-)
 
 
 class EmailSMTPAdapter:

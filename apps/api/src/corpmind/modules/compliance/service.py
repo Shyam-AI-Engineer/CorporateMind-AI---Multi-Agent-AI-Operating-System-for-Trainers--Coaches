@@ -132,6 +132,48 @@ class ComplianceService:
             )
         return ComplianceCheckResult(outcome=ComplianceOutcome.ALLOWED)
 
+    async def check_whatsapp_opt_in(self, req: ComplianceCheckRequest) -> ComplianceCheckResult:
+        """Verify contact has WhatsApp-specific opt-in (ADR-0010, Sprint 16A).
+
+        Checks hr_contacts.whatsapp_opt_in_at IS NOT NULL — a separate consent
+        record from the general is_contactable flag.  Required by Meta policy
+        and DPDP for WhatsApp channel sends.
+        """
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            text(
+                "SELECT whatsapp_opt_in_at, phone_deliverable FROM hr_contacts"
+                " WHERE id = :cid AND tenant_id = :tid"
+            ),
+            {"cid": str(req.contact_id), "tid": str(ctx.org_id)},
+        )
+        row = result.one_or_none()
+        has_wa_optin = bool(row and row[0] is not None)
+        phone_deliverable = bool(row and row[1]) if row else True
+        log.info(
+            "compliance.whatsapp_opt_in_check",
+            contact_id=str(req.contact_id),
+            has_wa_optin=has_wa_optin,
+            phone_deliverable=phone_deliverable,
+        )
+        if not has_wa_optin:
+            event = await self._write_block_audit(req, ctx, "whatsapp_opt_in")
+            return ComplianceCheckResult(
+                outcome=ComplianceOutcome.BLOCKED,
+                reason="Contact has no WhatsApp opt-in record",
+                blocked_by="whatsapp_opt_in",
+                audit_event_id=event.id,
+            )
+        if not phone_deliverable:
+            event = await self._write_block_audit(req, ctx, "phone_not_deliverable")
+            return ComplianceCheckResult(
+                outcome=ComplianceOutcome.BLOCKED,
+                reason="Contact phone is marked non-deliverable",
+                blocked_by="phone_not_deliverable",
+                audit_event_id=event.id,
+            )
+        return ComplianceCheckResult(outcome=ComplianceOutcome.ALLOWED)
+
     async def record_audit_event(
         self,
         *,

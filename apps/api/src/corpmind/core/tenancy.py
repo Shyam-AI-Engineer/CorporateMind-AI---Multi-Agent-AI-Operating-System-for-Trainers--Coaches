@@ -80,6 +80,8 @@ _PUBLIC_PREFIXES = (
     "/api/v1/inbox/callback",
     # Inbound webhooks verify their own HMAC before parsing
     "/api/v1/webhooks/",
+    # Meta WhatsApp delivery-receipt webhook — HMAC-verified, no JWT
+    "/api/v1/whatsapp/webhook",
 )
 
 

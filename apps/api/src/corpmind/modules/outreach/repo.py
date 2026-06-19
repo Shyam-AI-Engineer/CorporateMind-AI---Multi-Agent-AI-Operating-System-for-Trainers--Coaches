@@ -122,6 +122,22 @@ class OutboundMessageRepo:
             .values(subject=subject, body=body)
         )
 
+    async def update_status_by_provider_id(
+        self,
+        provider_message_id: str,
+        status: str,
+    ) -> None:
+        """Update status by provider_message_id (WhatsApp delivery receipts).
+
+        No tenant filter — provider_message_id is globally unique (Meta wamid).
+        Does NOT commit — caller commits.
+        """
+        await self._session.execute(
+            update(OutboundMessage)
+            .where(OutboundMessage.provider_message_id == provider_message_id)
+            .values(status=status)
+        )
+
     async def update_status(
         self,
         message_id: uuid.UUID,

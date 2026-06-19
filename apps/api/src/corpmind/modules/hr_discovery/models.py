@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, String, Text, func
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PgUUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from corpmind.core.database import TenantBase
@@ -53,4 +53,11 @@ class HRContact(TenantBase):
     opted_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     opt_in_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_contactable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # ── WhatsApp channel fields (Sprint 16A / ADR-0010) ──────────────────────
+    # E.164-normalised phone for WA dispatch (raw `phone` retained for display).
+    phone_e164: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    whatsapp_opt_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    whatsapp_opt_in_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone_deliverable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    whatsapp_last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

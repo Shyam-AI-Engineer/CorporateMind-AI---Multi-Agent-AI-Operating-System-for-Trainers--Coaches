@@ -73,7 +73,16 @@ def _queued_msg():
 
 class TestGetAdapter:
     def test_email_returns_smtp_adapter(self):
+        from corpmind.channels.registry import initialize_adapters
+        initialize_adapters()
         adapter = _get_adapter("email")
+        assert adapter is not None
+        assert hasattr(adapter, "send")
+
+    def test_whatsapp_returns_whatsapp_adapter(self):
+        from corpmind.channels.registry import initialize_adapters
+        initialize_adapters()
+        adapter = _get_adapter("whatsapp")
         assert adapter is not None
         assert hasattr(adapter, "send")
 

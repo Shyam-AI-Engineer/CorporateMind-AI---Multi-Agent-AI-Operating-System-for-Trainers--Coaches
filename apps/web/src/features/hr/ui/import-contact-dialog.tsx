@@ -24,6 +24,13 @@ const schema = z.object({
   // Opt-in fields are optional — omitting them marks the contact as non-contactable.
   opted_in_at: z.string().optional(),
   opt_in_evidence: z.string().min(5, "At least 5 characters").optional().or(z.literal("")),
+  // WhatsApp fields (Sprint 16A)
+  phone_e164: z
+    .string()
+    .regex(/^\+[1-9]\d{6,14}$/, "Must be E.164 format: +919876543210")
+    .optional()
+    .or(z.literal("")),
+  whatsapp_opt_in_at: z.string().optional(),
   company_name: z.string().min(1, "Required"),
   company_industry: z.string().optional(),
   company_city: z.string().optional(),
@@ -60,6 +67,10 @@ export function ImportContactDialog({ open, onOpenChange }: ImportContactDialogP
             source_type: values.source_type as typeof SOURCE_TYPES[number],
             opted_in_at: values.opted_in_at ? new Date(values.opted_in_at).toISOString() : null,
             opt_in_evidence: values.opt_in_evidence || null,
+            phone_e164: values.phone_e164 || null,
+            whatsapp_opt_in_at: values.whatsapp_opt_in_at
+              ? new Date(values.whatsapp_opt_in_at).toISOString()
+              : null,
             company_name: values.company_name,
             company_industry: values.company_industry || null,
             company_city: values.company_city || null,
@@ -153,6 +164,29 @@ export function ImportContactDialog({ open, onOpenChange }: ImportContactDialogP
               />
               {errors.opt_in_evidence && (
                 <p className="text-xs text-destructive">{errors.opt_in_evidence.message}</p>
+              )}
+            </div>
+          </div>
+
+          {/* WhatsApp — optional; required to send on WhatsApp channel */}
+          <p className="text-xs font-medium text-muted-foreground pt-1">WhatsApp <span className="font-normal">(optional — required for WhatsApp campaigns)</span></p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="phone_e164">Phone (E.164)</Label>
+              <Input
+                id="phone_e164"
+                placeholder="+919876543210"
+                {...register("phone_e164")}
+              />
+              {errors.phone_e164 && (
+                <p className="text-xs text-destructive">{errors.phone_e164.message}</p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="whatsapp_opt_in_at">WA opt-in at</Label>
+              <Input id="whatsapp_opt_in_at" type="datetime-local" {...register("whatsapp_opt_in_at")} />
+              {errors.whatsapp_opt_in_at && (
+                <p className="text-xs text-destructive">{errors.whatsapp_opt_in_at.message}</p>
               )}
             </div>
           </div>

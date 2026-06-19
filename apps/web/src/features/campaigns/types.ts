@@ -73,6 +73,6 @@ export const CHANNEL_CONFIG: Record<string, { label: string; emoji: string }> = 
 
 // Channels the backend can actually send on today.
 // Others are UI-visible but disabled to prevent silent failures.
-export const LIVE_CHANNELS = new Set(["email"]);
+export const LIVE_CHANNELS = new Set(["email", "whatsapp"]);
 
 export const SUPPORTED_CHANNELS = Object.keys(CHANNEL_CONFIG);

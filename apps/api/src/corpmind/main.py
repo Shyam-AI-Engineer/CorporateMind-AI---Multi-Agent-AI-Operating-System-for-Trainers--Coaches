@@ -150,6 +150,7 @@ def _register_routers(app: FastAPI) -> None:
 
     from corpmind.modules.inbox.api import router as inbox_router
     from corpmind.modules.crm.booking_webhook import router as booking_webhook_router
+    from corpmind.modules.whatsapp.api import router as whatsapp_router
 
     app.include_router(identity_router, prefix="/api/v1/identity", tags=["identity"])
     app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["inbox"])
@@ -163,6 +164,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(billing_router, prefix="/api/v1/billing", tags=["billing"])
     app.include_router(social_router, prefix="/api/v1/social", tags=["social"])
     app.include_router(booking_webhook_router, prefix="/api/v1/webhooks", tags=["webhooks"])
+    app.include_router(whatsapp_router, prefix="/api/v1/whatsapp", tags=["whatsapp"])
 
     # Health check (no auth required)
     from fastapi import APIRouter

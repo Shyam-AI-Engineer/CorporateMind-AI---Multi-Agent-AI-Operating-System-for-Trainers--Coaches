@@ -5,6 +5,10 @@ export interface HRContact {
   title: string;
   email: string;
   email_deliverable: boolean;
+  phone: string | null;
+  phone_e164: string | null;
+  phone_deliverable: boolean;
+  whatsapp_opt_in_at: string | null;
   preferred_language: string | null;
   source_type: string;
   is_contactable: boolean;
@@ -48,6 +52,8 @@ export interface ContactImportItem {
   source_type: SourceType;
   opted_in_at: string | null;
   opt_in_evidence: string | null;
+  phone_e164?: string | null;
+  whatsapp_opt_in_at?: string | null;
   company_name: string;
   company_industry: string | null;
   company_city: string | null;

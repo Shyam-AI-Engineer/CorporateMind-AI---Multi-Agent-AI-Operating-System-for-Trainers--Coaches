@@ -50,7 +50,7 @@ from corpmind.modules.outreach.schemas import (
 
 log = structlog.get_logger(__name__)
 
-_SUPPORTED_CHANNELS = frozenset({"email"})
+_SUPPORTED_CHANNELS = frozenset({"email", "whatsapp"})
 
 # Follow-up task type → (routing task class, prompt name). Premium tier; see
 # ADR-0008 §4 and routing.py.  Both prompts are non-cacheable (euri-gateway.md).
@@ -95,27 +95,29 @@ class OutreachService:
 
         trainer = await self._fetch_trainer_profile(ctx.workspace_id, ctx.org_id)
 
-        result = await self._llm.chat(
-            task="outreach_copy",
-            prompt_name="outreach.email",
-            prompt_inputs=_build_prompt_inputs(contact, trainer),
-            tenant_id=ctx.org_id,
-            request_id=ctx.request_id,
-            agent="outreach_service",
-        )
-        copy = self._parse_copy(result["content"])
-
-        msg = OutboundMessage(
-            tenant_id=ctx.org_id,
-            campaign_id=req.campaign_id,
-            contact_id=req.contact_id,
-            channel=req.channel,
-            subject=copy.get("subject"),
-            body=copy["body"],
-            prompt_version="outreach.email.v1",
-            ab_variant=req.ab_variant,
-            status="draft",
-        )
+        if req.channel == "whatsapp":
+            msg = await self._generate_whatsapp_message(req, contact)
+        else:
+            result = await self._llm.chat(
+                task="outreach_copy",
+                prompt_name="outreach.email",
+                prompt_inputs=_build_prompt_inputs(contact, trainer),
+                tenant_id=ctx.org_id,
+                request_id=ctx.request_id,
+                agent="outreach_service",
+            )
+            copy = self._parse_copy(result["content"])
+            msg = OutboundMessage(
+                tenant_id=ctx.org_id,
+                campaign_id=req.campaign_id,
+                contact_id=req.contact_id,
+                channel=req.channel,
+                subject=copy.get("subject"),
+                body=copy["body"],
+                prompt_version="outreach.email.v1",
+                ab_variant=req.ab_variant,
+                status="draft",
+            )
         await self._repo.create(msg)
         await self._session.commit()
         log.info(
@@ -325,13 +327,51 @@ class OutreachService:
 
     # ── Data fetching (raw SQL — no cross-module ORM model imports) ───────────
 
+    async def _generate_whatsapp_message(
+        self, req: "GenerateOutreachRequest", contact: dict
+    ) -> "OutboundMessage":
+        """Generate a WhatsApp outreach draft (Sprint 16A).
+
+        Requires phone_e164 on the contact.  Uses the outreach.whatsapp prompt
+        to produce a short, conversational message body.  Template name is
+        stored in prompt_version so the send task can read it for the Meta API.
+        """
+        if not contact.get("phone_e164"):
+            raise ValidationError(
+                f"Contact {req.contact_id} has no phone_e164 — "
+                "WhatsApp outreach requires a verified E.164 phone number."
+            )
+        ctx = get_tenant_context()
+        trainer = await self._fetch_trainer_profile(ctx.workspace_id, ctx.org_id)
+        result = await self._llm.chat(
+            task="outreach_copy",
+            prompt_name="outreach.whatsapp",
+            prompt_inputs=_build_prompt_inputs(contact, trainer),
+            tenant_id=ctx.org_id,
+            request_id=ctx.request_id,
+            agent="outreach_service",
+        )
+        copy = self._parse_copy(result["content"])
+        return OutboundMessage(
+            tenant_id=ctx.org_id,
+            campaign_id=req.campaign_id,
+            contact_id=req.contact_id,
+            channel="whatsapp",
+            subject=None,
+            body=copy["body"],
+            prompt_version=copy.get("template_name", "outreach_intro_v1"),
+            ab_variant=req.ab_variant,
+            status="draft",
+        )
+
     async def _fetch_contact(
         self, contact_id: uuid.UUID, tenant_id: uuid.UUID
     ) -> dict | None:
         result = await self._session.execute(
             text(
                 "SELECT hc.id, hc.full_name, hc.title, hc.email, hc.is_contactable,"
-                "       hc.preferred_language, c.name AS company_name, c.industry"
+                "       hc.preferred_language, hc.phone_e164,"
+                "       c.name AS company_name, c.industry"
                 " FROM hr_contacts hc"
                 " LEFT JOIN companies c"
                 "   ON c.id = hc.company_id AND c.tenant_id = :tid"

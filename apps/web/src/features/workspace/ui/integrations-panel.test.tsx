@@ -6,6 +6,11 @@ import type { WorkspaceBookingWebhook } from "@/features/workspace/types";
 
 const mockMutateAsync = vi.fn();
 
+// WhatsAppSettingsCard uses useQuery — stub it out to avoid QueryClientProvider
+vi.mock("@/features/whatsapp/ui/whatsapp-settings-card", () => ({
+  WhatsAppSettingsCard: () => <div data-testid="whatsapp-settings-stub" />,
+}));
+
 vi.mock("@/features/workspace/api/use-workspace-settings", () => ({
   useBookingWebhook: vi.fn(),
   useRegenerateBookingSecret: () => ({

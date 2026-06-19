@@ -15,6 +15,10 @@ class HRContactOut(BaseModel):
     title: str | None
     email: str | None
     email_deliverable: bool
+    phone: str | None = None
+    phone_e164: str | None = None
+    phone_deliverable: bool = True
+    whatsapp_opt_in_at: datetime | None = None
     preferred_language: str | None
     source_type: str
     is_contactable: bool

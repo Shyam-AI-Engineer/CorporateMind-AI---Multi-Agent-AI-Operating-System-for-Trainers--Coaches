@@ -8,6 +8,7 @@ import {
   useBookingWebhook,
   useRegenerateBookingSecret,
 } from "@/features/workspace/api/use-workspace-settings";
+import { WhatsAppSettingsCard } from "@/features/whatsapp/ui/whatsapp-settings-card";
 
 export function IntegrationsPanel() {
   const { data, isLoading, isError } = useBookingWebhook();
@@ -51,7 +52,13 @@ export function IntegrationsPanel() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-10">
+      {/* WhatsApp Business integration */}
+      <div className="rounded-lg border p-6">
+        <WhatsAppSettingsCard />
+      </div>
+
+      <div className="space-y-6">
       <div className="flex items-center gap-2">
         <Webhook className="h-5 w-5 text-primary" />
         <h2 className="text-base font-semibold">Booking Webhook</h2>
@@ -157,6 +164,7 @@ export function IntegrationsPanel() {
           <li>4. Paste the secret into the &ldquo;HMAC secret&rdquo; / &ldquo;Signing key&rdquo; field.</li>
           <li>5. Set the payload to include invitee email and scheduled time.</li>
         </ol>
+      </div>
       </div>
     </div>
   );

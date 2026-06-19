@@ -228,45 +228,61 @@ async def _run_send(
                 )
                 return {"status": "skipped", "message_id": message_id}
 
-            # Write-before-send: generate smtp_message_id once and persist it before
-            # any network I/O.  On Celery retry the existing value is reused so the
-            # same Message-ID header is sent even if the first attempt crashed after
-            # the DB commit but before aiosmtplib completed.
-            if msg.smtp_message_id is None:
-                smtp_message_id = f"<{ULID()}@{settings.MAIL_DOMAIN}>"
-                await repo.set_smtp_message_id(msg_uuid, smtp_message_id)
-                await session.commit()
-                log.info(
-                    "outreach.send.smtp_message_id_generated",
-                    message_id=message_id,
-                    smtp_message_id=smtp_message_id,
+            # ── Resolve recipient address by channel ──────────────────────────
+            if channel == "email":
+                # Write-before-send: generate smtp_message_id once and persist it
+                # before any network I/O.  On retry the existing value is reused so
+                # the same Message-ID header is sent (idempotency).
+                if msg.smtp_message_id is None:
+                    smtp_message_id = f"<{ULID()}@{settings.MAIL_DOMAIN}>"
+                    await repo.set_smtp_message_id(msg_uuid, smtp_message_id)
+                    await session.commit()
+                    log.info(
+                        "outreach.send.smtp_message_id_generated",
+                        message_id=message_id,
+                        smtp_message_id=smtp_message_id,
+                    )
+                else:
+                    smtp_message_id = msg.smtp_message_id
+                    log.info(
+                        "outreach.send.smtp_message_id_reused",
+                        message_id=message_id,
+                        smtp_message_id=smtp_message_id,
+                    )
+                result = await session.execute(
+                    text(
+                        "SELECT email FROM hr_contacts"
+                        " WHERE id = :cid AND tenant_id = :tid"
+                    ),
+                    {"cid": str(msg.contact_id), "tid": str(tenant_uuid)},
                 )
+                row = result.one_or_none()
+                recipient_address = row[0] if row else None
+                if not recipient_address:
+                    await repo.update_status(msg_uuid, "blocked")
+                    await session.commit()
+                    log.warning("outreach.send.no_email", message_id=message_id)
+                    return {"status": "blocked", "message_id": message_id, "reason": "no_email"}
+                smtp_message_id_val: str | None = smtp_message_id
             else:
-                smtp_message_id = msg.smtp_message_id
-                log.info(
-                    "outreach.send.smtp_message_id_reused",
-                    message_id=message_id,
-                    smtp_message_id=smtp_message_id,
+                # WhatsApp (and future channels): use phone_e164 as recipient.
+                result = await session.execute(
+                    text(
+                        "SELECT phone_e164 FROM hr_contacts"
+                        " WHERE id = :cid AND tenant_id = :tid"
+                    ),
+                    {"cid": str(msg.contact_id), "tid": str(tenant_uuid)},
                 )
+                row = result.one_or_none()
+                recipient_address = row[0] if row else None
+                if not recipient_address:
+                    await repo.update_status(msg_uuid, "blocked")
+                    await session.commit()
+                    log.warning("outreach.send.no_phone_e164", message_id=message_id)
+                    return {"status": "blocked", "message_id": message_id, "reason": "no_phone_e164"}
+                smtp_message_id_val = None
 
-            # Fetch contact email for compliance + channel dispatch.
-            result = await session.execute(
-                text(
-                    "SELECT email FROM hr_contacts"
-                    " WHERE id = :cid AND tenant_id = :tid"
-                ),
-                {"cid": str(msg.contact_id), "tid": str(tenant_uuid)},
-            )
-            contact_row = result.one_or_none()
-            contact_email = contact_row[0] if contact_row else None
-
-            if not contact_email:
-                await repo.update_status(msg_uuid, "blocked")
-                await session.commit()
-                log.warning("outreach.send.no_email", message_id=message_id)
-                return {"status": "blocked", "message_id": message_id, "reason": "no_email"}
-
-            rhash = recipient_hmac(contact_email, tenant_uuid)
+            rhash = recipient_hmac(recipient_address, tenant_uuid)
             comp_req = ComplianceCheckRequest(
                 contact_id=msg.contact_id,
                 channel=msg.channel,
@@ -275,11 +291,14 @@ async def _run_send(
                 recipient_hash=rhash,
             )
             compliance = ComplianceService(session)
-            for check_fn in (
+            checks = [
                 compliance.check_opt_in,
                 compliance.check_frequency_cap,
                 compliance.check_unsubscribe,
-            ):
+            ]
+            if channel == "whatsapp":
+                checks.append(compliance.check_whatsapp_opt_in)
+            for check_fn in checks:
                 check_result = await check_fn(comp_req)
                 if check_result.outcome == ComplianceOutcome.BLOCKED:
                     await repo.update_status(msg_uuid, "blocked")
@@ -295,21 +314,26 @@ async def _run_send(
                         "reason": check_result.blocked_by,
                     }
 
-            # Dispatch via channel adapter.
-            # Threading (Sprint 8B): when in_reply_to is supplied (follow-up sends),
-            # pass it through metadata so the adapter sets In-Reply-To / References.
-            send_metadata: dict = {"smtp_message_id": smtp_message_id}
-            if in_reply_to:
-                send_metadata["in_reply_to"] = in_reply_to
-                send_metadata["references"] = in_reply_to
+            # Dispatch via channel adapter (registry resolves by channel name).
+            send_metadata: dict = {}
+            if channel == "email":
+                send_metadata["smtp_message_id"] = smtp_message_id_val
+                if in_reply_to:
+                    send_metadata["in_reply_to"] = in_reply_to
+                    send_metadata["references"] = in_reply_to
+            elif channel == "whatsapp":
+                # Template name stored in prompt_version (e.g. "outreach_intro_v1").
+                # Template params are empty for Sprint 16A static templates.
+                send_metadata["template_language"] = "en"
+                send_metadata["template_params"] = []
             channel_msg = ChannelMessage(
                 message_id=message_id,
                 recipient_id=str(msg.contact_id),
-                recipient_address=contact_email,
+                recipient_address=recipient_address,
                 channel=channel,
                 subject=msg.subject,
                 body=msg.body,
-                template_id=None,
+                template_id=msg.prompt_version if channel == "whatsapp" else None,
                 tenant_id=tenant_id,
                 request_id=request_id,
                 metadata=send_metadata,
@@ -380,11 +404,9 @@ async def _run_send(
 
 
 def _get_adapter(channel: str):
-    from corpmind.channels.email_smtp import EmailSMTPAdapter
+    from corpmind.channels.registry import get as registry_get
 
-    if channel == "email":
-        return EmailSMTPAdapter()
-    raise ValueError(f"No adapter registered for channel: {channel!r}")
+    return registry_get(channel)
 
 
 # ── Follow-up cadence async implementation (Sprint 8B) ──────────────────────────

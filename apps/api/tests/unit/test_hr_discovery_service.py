@@ -105,6 +105,12 @@ def _fake_contact(**overrides) -> MagicMock:
         title="VP HR",
         email="ananya@acmecorp.in",
         email_deliverable=True,
+        # WhatsApp fields added Sprint 16A — must be explicit or Pydantic
+        # sees MagicMock (not str|None) and raises ValidationError.
+        phone=None,
+        phone_e164=None,
+        phone_deliverable=True,
+        whatsapp_opt_in_at=None,
         preferred_language="en",
         source_type="webinar_registration",
         is_contactable=True,

@@ -18,7 +18,7 @@ def register(adapter: ChannelAdapter) -> None:
 def get(channel: str) -> ChannelAdapter:
     adapter = _registry.get(channel)
     if adapter is None:
-        raise KeyError(f"No channel adapter registered for '{channel}'")
+        raise ValueError(f"No adapter registered for channel: {channel!r}")
     return adapter
 
 
@@ -29,5 +29,7 @@ def list_channels() -> list[str]:
 def initialize_adapters() -> None:
     """Register all channel adapters. Called during app lifespan startup."""
     from corpmind.channels.email_smtp import EmailSMTPAdapter
+    from corpmind.channels.whatsapp_cloud import WhatsAppCloudAdapter
 
     register(EmailSMTPAdapter())
+    register(WhatsAppCloudAdapter())
