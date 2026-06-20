@@ -126,17 +126,49 @@ class OutboundMessageRepo:
         self,
         provider_message_id: str,
         status: str,
+        *,
+        now: datetime | None = None,
     ) -> None:
-        """Update status by provider_message_id (WhatsApp delivery receipts).
+        """Update status + delivery timestamps by provider_message_id.
 
         No tenant filter — provider_message_id is globally unique (Meta wamid).
+        Timestamps use first-write-wins: COALESCE(existing, :ts) so duplicate
+        webhooks never overwrite the original receipt time.
         Does NOT commit — caller commits.
         """
-        await self._session.execute(
-            update(OutboundMessage)
-            .where(OutboundMessage.provider_message_id == provider_message_id)
-            .values(status=status)
-        )
+        from datetime import UTC
+
+        ts = now or datetime.now(UTC)
+
+        # Build timestamp values using first-write-wins (COALESCE).
+        # The raw SQL approach lets us express COALESCE atomically without a
+        # read-modify-write cycle, which would create a race under concurrent retries.
+        col_map = {
+            "delivered": "delivered_at",
+            "opened": "read_at",  # Meta calls it 'read'; normalised to 'opened'
+            "failed": "failed_at",
+        }
+        ts_col = col_map.get(status)
+
+        from sqlalchemy import text as sa_text
+
+        if ts_col:
+            await self._session.execute(
+                sa_text(
+                    f"UPDATE outbound_messages"  # noqa: S608
+                    f" SET status = :status,"
+                    f" {ts_col} = COALESCE({ts_col}, :ts)"
+                    f" WHERE provider_message_id = :pid"
+                ),
+                {"status": status, "ts": ts, "pid": provider_message_id},
+            )
+        else:
+            # sent / unknown statuses: update status only, no timestamp change.
+            await self._session.execute(
+                update(OutboundMessage)
+                .where(OutboundMessage.provider_message_id == provider_message_id)
+                .values(status=status)
+            )
 
     async def update_status(
         self,

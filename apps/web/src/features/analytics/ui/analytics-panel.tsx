@@ -17,6 +17,7 @@ import {
   useAnalyticsSummary,
   useAnalyticsTrend,
 } from "@/features/analytics/api/use-analytics";
+import { WhatsAppMetricsCard } from "@/features/analytics/ui/whatsapp-metrics-card";
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
@@ -221,6 +222,9 @@ export function AnalyticsPanel() {
           )}
         </CardContent>
       </Card>
+
+      {/* WhatsApp delivery KPIs */}
+      <WhatsAppMetricsCard days={30} />
     </div>
   );
 }

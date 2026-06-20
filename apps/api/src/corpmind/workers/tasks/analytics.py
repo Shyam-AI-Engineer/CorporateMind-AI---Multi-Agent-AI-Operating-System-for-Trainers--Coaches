@@ -269,6 +269,50 @@ async def _compute_tenant_rollup(
             )
             proposals_sent = scalar(props_sent_row.scalar_one())
 
+            # ── WhatsApp per-channel metrics ───────────────────────────────────
+            # Reads outbound_messages directly (not campaign_recipients) because
+            # WA delivery/read timestamps live on outbound_messages (Sprint 16B).
+            wa_sent_row = await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbound_messages"
+                    " WHERE tenant_id = :tid AND channel = 'whatsapp'"
+                    " AND sent_at::date = :d"
+                ),
+                {"tid": tenant_id, "d": d_str},
+            )
+            wa_sent = scalar(wa_sent_row.scalar_one())
+
+            wa_delivered_row = await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbound_messages"
+                    " WHERE tenant_id = :tid AND channel = 'whatsapp'"
+                    " AND delivered_at::date = :d"
+                ),
+                {"tid": tenant_id, "d": d_str},
+            )
+            wa_delivered = scalar(wa_delivered_row.scalar_one())
+
+            wa_read_row = await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbound_messages"
+                    " WHERE tenant_id = :tid AND channel = 'whatsapp'"
+                    " AND read_at::date = :d"
+                ),
+                {"tid": tenant_id, "d": d_str},
+            )
+            wa_opened = scalar(wa_read_row.scalar_one())
+
+            wa_blocks_row = await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM outbound_messages"
+                    " WHERE tenant_id = :tid AND channel = 'whatsapp'"
+                    " AND status = 'blocked'"
+                    " AND updated_at::date = :d"
+                ),
+                {"tid": tenant_id, "d": d_str},
+            )
+            wa_blocks = scalar(wa_blocks_row.scalar_one())
+
             # ── Upsert (channel=None = cross-channel aggregate) ───────────────────
             repo = AnalyticsDailyRepo(session)
             await repo.upsert_rollup(
@@ -288,6 +332,28 @@ async def _compute_tenant_rollup(
                 proposals_approved=proposals_approved,
                 proposals_sent=proposals_sent,
                 ai_spend_inr=0.0,  # model_runs table not yet wired — Phase 2
+            )
+
+            # ── Upsert per-channel WhatsApp row ──────────────────────────────────
+            # CRM / proposal metrics are cross-channel and not meaningful per channel;
+            # set them to zero in the channel-specific row.
+            await repo.upsert_rollup(
+                tenant_id=tenant_id,
+                rollup_date=d,
+                channel="whatsapp",
+                outreach_sent=wa_sent,
+                outreach_delivered=wa_delivered,
+                outreach_opened=wa_opened,
+                outreach_replied=0,  # WA reply pipeline is Sprint 17
+                compliance_blocks=wa_blocks,
+                meetings_scheduled=0,
+                meetings_completed=0,
+                leads_created=0,
+                leads_booked=0,
+                proposals_generated=0,
+                proposals_approved=0,
+                proposals_sent=0,
+                ai_spend_inr=0.0,
             )
             await session.commit()
 

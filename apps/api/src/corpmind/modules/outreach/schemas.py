@@ -28,6 +28,9 @@ class OutboundMessageOut(BaseModel):
     smtp_message_id: str | None
     provider_message_id: str | None
     sent_at: datetime | None
+    delivered_at: datetime | None = None
+    read_at: datetime | None = None
+    failed_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

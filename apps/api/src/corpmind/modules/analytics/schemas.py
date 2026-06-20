@@ -80,3 +80,23 @@ class AnalyticsFunnelOut(BaseModel):
     meetings: int
     proposals: int
     bookings: int
+
+
+class AnalyticsChannelSummary(BaseModel):
+    """Per-channel outreach performance summary.
+
+    sent / delivered / opened roll up from analytics_daily (channel-specific rows).
+    failed is computed live from outbound_messages because analytics_daily has
+    no outreach_failed column — same pattern as get_funnel().
+    delivery_rate and read_rate are computed fields clamped to [0.0, 1.0].
+    """
+
+    channel: str
+    period_days: int
+    sent: int
+    delivered: int
+    opened: int
+    failed: int
+    compliance_blocks: int
+    delivery_rate: float   # delivered / sent
+    read_rate: float       # opened / delivered

@@ -28,7 +28,9 @@ from typing import TYPE_CHECKING
 
 import httpx
 import structlog
-from starlette.datastructures import Headers
+
+if TYPE_CHECKING:
+    from starlette.datastructures import Headers
 
 from corpmind.channels.base import (
     DeliveryStatus,
@@ -40,14 +42,16 @@ from corpmind.channels.metrics import channel_send_latency_seconds as _send_late
 from corpmind.channels.metrics import channel_send_total as _send_total
 from corpmind.core.config import settings
 
-if TYPE_CHECKING:
-    pass
-
 log = structlog.get_logger(__name__)
 
 # Meta Graph API version — pin explicitly; update on Meta sunset notices.
 _API_VERSION = "v20.0"
 _GRAPH_BASE = "https://graph.facebook.com"
+
+# Replay-protection TTL for Meta webhook event ids (seconds).
+# Meta retries unacknowledged webhooks for up to 24h, so 24h TTL guarantees
+# we drop every duplicate within the provider retry window.
+_WEBHOOK_EVENT_TTL = 86_400  # 24 hours
 
 # Status values from Meta webhook delivery receipts.
 _META_STATUS_MAP: dict[str, DeliveryStatus] = {
@@ -141,7 +145,7 @@ class WhatsAppCloudAdapter:
                     error_detail=str(exc),
                 )
 
-    async def fetch_status(self, message_id: str) -> DeliveryStatus:  # noqa: ARG002
+    async def fetch_status(self, message_id: str) -> DeliveryStatus:
         # Delivery status arrives via webhook — Meta has no polling endpoint.
         return DeliveryStatus.SENT
 
@@ -150,9 +154,9 @@ class WhatsAppCloudAdapter:
     ) -> list[InboundEvent]:
         """Parse a Meta webhook for delivery receipt events.
 
-        Verifies X-Hub-Signature-256 BEFORE parsing.  Only delivery-receipt
-        status updates are returned in Sprint 16A; inbound messages are
-        intentionally dropped (Sprint 17 scope).
+        Verifies X-Hub-Signature-256 BEFORE parsing.  Each status event is
+        replay-protected via a Redis NX lock keyed by the Meta event id (24h TTL).
+        Inbound messages are intentionally dropped (Sprint 17 scope).
         """
         self._verify_hmac(payload, headers)
 
@@ -167,10 +171,36 @@ class WhatsAppCloudAdapter:
             for change in entry.get("changes", []):
                 value = change.get("value", {})
                 for status in value.get("statuses", []):
+                    event_id = status.get("id")
+                    if event_id and self._is_duplicate(event_id):
+                        log.info("whatsapp.webhook.replay_skip", event_id=event_id)
+                        continue
                     event = self._parse_status(status, payload)
                     if event:
                         events.append(event)
         return events
+
+    def _is_duplicate(self, event_id: str) -> bool:
+        """Return True when this event_id was already processed (replay protection).
+
+        Uses a Redis NX lock with a 24h TTL — mirrors the inbox sync dedup
+        pattern.  Returns False when Redis is unavailable (fail-open to avoid
+        blocking the entire webhook on a cache outage).
+        """
+        try:
+            import redis as _redis
+
+            r = _redis.from_url(settings.REDIS_URL, decode_responses=True)
+            try:
+                key = f"wa:webhook:event:{event_id}"
+                # SET NX: only sets if key does not exist; returns True on set, False on collision.
+                was_new = r.set(key, "1", ex=_WEBHOOK_EVENT_TTL, nx=True)
+                return not was_new  # duplicate if key already existed (NX returned None/False)
+            finally:
+                r.close()
+        except Exception as exc:
+            log.warning("whatsapp.webhook.replay_guard_error", error=str(exc))
+            return False  # fail-open
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

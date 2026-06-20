@@ -12,6 +12,16 @@ vi.mock("@/features/analytics/api/use-analytics", () => ({
   useAnalyticsSummary: vi.fn(),
   useAnalyticsTrend: vi.fn(),
   useAnalyticsFunnel: vi.fn(),
+  useWhatsAppAnalytics: vi.fn(() => ({
+    data: undefined,
+    isLoading: true,
+    isError: false,
+    refetch: vi.fn(),
+  })),
+}));
+
+vi.mock("@/features/analytics/ui/whatsapp-metrics-card", () => ({
+  WhatsAppMetricsCard: () => <div data-testid="wa-metrics-card" />,
 }));
 
 // recharts uses ResizeObserver which is not in jsdom

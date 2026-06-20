@@ -35,3 +35,15 @@ export interface AnalyticsFunnel {
   proposals: number;
   bookings: number;
 }
+
+export interface AnalyticsChannelSummary {
+  channel: string;
+  period_days: number;
+  sent: number;
+  delivered: number;
+  opened: number;
+  failed: number;
+  compliance_blocks: number;
+  delivery_rate: number;  // 0.0–1.0
+  read_rate: number;      // 0.0–1.0
+}

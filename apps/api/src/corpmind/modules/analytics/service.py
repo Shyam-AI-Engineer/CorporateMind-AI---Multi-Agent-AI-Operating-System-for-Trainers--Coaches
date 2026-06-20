@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from corpmind.core.tenancy import get_tenant_context
 from corpmind.modules.analytics.repo import AnalyticsDailyRepo
 from corpmind.modules.analytics.schemas import (
+    AnalyticsChannelSummary,
     AnalyticsFunnelOut,
     AnalyticsSummary,
     AnalyticsTrendOut,
@@ -214,4 +215,68 @@ class AnalyticsService:
             meetings=meetings,
             proposals=proposals,
             bookings=bookings,
+        )
+
+    async def get_channel_summary(
+        self, *, channel: str, days: int = 30
+    ) -> AnalyticsChannelSummary:
+        """Return per-channel outreach performance for the last N days.
+
+        sent / delivered / opened / compliance_blocks: summed from analytics_daily
+        channel-specific rows (written by the WA rollup in Sprint 16B).
+        failed: computed live from outbound_messages because analytics_daily has
+        no outreach_failed column — identical pattern to get_funnel().
+        """
+        ctx = get_tenant_context()
+        to_date = date.today()
+        from_date = to_date - timedelta(days=days - 1)
+
+        repo = AnalyticsDailyRepo(self._session)
+        rows = await repo.list_by_date_range(from_date, to_date)
+        channel_rows = [r for r in rows if r.channel == channel]
+
+        sent = sum(r.outreach_sent for r in channel_rows)
+        delivered = sum(r.outreach_delivered for r in channel_rows)
+        opened = sum(r.outreach_opened for r in channel_rows)
+        compliance_blocks = sum(r.compliance_blocks for r in channel_rows)
+
+        # failed: live query — analytics_daily has no outreach_failed column.
+        failed_result = await self._session.execute(
+            text(
+                "SELECT COUNT(*) FROM outbound_messages"
+                " WHERE tenant_id = :tid AND channel = :ch"
+                " AND failed_at::date >= :from_d AND failed_at::date <= :to_d"
+            ),
+            {
+                "tid": ctx.org_id,
+                "ch": channel,
+                "from_d": str(from_date),
+                "to_d": str(to_date),
+            },
+        )
+        failed = int(failed_result.scalar_one() or 0)
+
+        delivery_rate = round(delivered / sent, 4) if sent else 0.0
+        read_rate = round(opened / delivered, 4) if delivered else 0.0
+
+        log.info(
+            "analytics.channel_summary.computed",
+            tenant_id=str(ctx.org_id),
+            channel=channel,
+            days=days,
+            sent=sent,
+            delivered=delivered,
+            opened=opened,
+        )
+
+        return AnalyticsChannelSummary(
+            channel=channel,
+            period_days=days,
+            sent=sent,
+            delivered=delivered,
+            opened=opened,
+            failed=failed,
+            compliance_blocks=compliance_blocks,
+            delivery_rate=delivery_rate,
+            read_rate=read_rate,
         )
