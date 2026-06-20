@@ -97,6 +97,21 @@ class ContactBounced:
 
 
 @dataclass(frozen=True)
+class ContactUnsubscribed:
+    """Emitted when an `unsubscribe` intent cleared the channel opt-in.
+
+    `channel` identifies which opt-in was revoked (e.g. "whatsapp").  Email
+    unsubscribes use the existing unsubscribe_list table and a separate path.
+    """
+
+    contact_id: uuid.UUID
+    tenant_id: uuid.UUID
+    channel: str
+    source_inbox_message_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
 class BookingWebhookReceived:
     """Emitted when a booking webhook payload passes HMAC verification.
 

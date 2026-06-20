@@ -36,6 +36,7 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from corpmind.core.config import settings
 from corpmind.core.encryption import decrypt, encrypt
 from corpmind.core.exceptions import ConflictError, NotFoundError, ValidationError
 from corpmind.core.tenancy import get_tenant_context
@@ -424,6 +425,48 @@ class InboxService:
         )
         await self._session.commit()
 
+    # ── WhatsApp Inbox Connection ──────────────────────────────────────────────
+
+    async def get_or_create_wa_connection(self, workspace_id: uuid.UUID) -> uuid.UUID:
+        """Return (creating if absent) the system WhatsApp InboxConnection for a workspace.
+
+        WhatsApp inbound messages have no OAuth refresh token — the connection record
+        is a bookkeeping anchor for the (connection_id, provider_message_id) unique
+        constraint and for the CASCADE-delete relationship.  One connection per
+        (tenant, workspace) is created lazily on the first inbound message; subsequent
+        calls return the existing id without a write.
+
+        The encrypted placeholder fields satisfy NOT NULL constraints on InboxConnection
+        without exposing real credentials.  provider='whatsapp' distinguishes these
+        system rows from OAuth-backed Gmail connections in the admin UI.
+        """
+        conn = await self._conn_repo.find_wa_connection(workspace_id)
+        if conn is not None:
+            return conn.id
+
+        ctx = get_tenant_context()
+        phone_id = settings.WHATSAPP_PHONE_NUMBER_ID or "unknown"
+        phone_str = f"whatsapp:{phone_id}"
+        conn = InboxConnection(
+            tenant_id=ctx.org_id,
+            workspace_id=workspace_id,
+            provider="whatsapp",
+            email_address_enc=encrypt(phone_str),
+            email_address_hash=_email_address_hash(phone_str, ctx.org_id),
+            refresh_token_enc=encrypt("_whatsapp_webhook_no_token_"),
+            scopes="whatsapp_webhook",
+            status="active",
+            connected_by=uuid.UUID(int=0),
+        )
+        await self._conn_repo.create(conn)
+        await self._session.commit()
+        log.info(
+            "inbox.wa_connection_created",
+            workspace_id=str(workspace_id),
+            phone_number_id=phone_id,
+        )
+        return conn.id
+
     # ── Reply Matching ─────────────────────────────────────────────────────────
 
     async def match_reply(self, smtp_message_id: str) -> uuid.UUID | None:
@@ -441,6 +484,28 @@ class InboxService:
                 " LIMIT 1"
             ),
             {"tid": str(ctx.org_id), "mid": smtp_message_id},
+        )
+        row = result.one_or_none()
+        return uuid.UUID(str(row[0])) if row else None
+
+    async def match_reply_by_provider_id(
+        self, provider_message_id: str
+    ) -> uuid.UUID | None:
+        """Resolve a WhatsApp context.id (outbound wamid) to outbound_message_id.
+
+        WhatsApp inbound messages carry context.id = the Meta message ID of the
+        outbound we sent.  This differs from email where In-Reply-To headers carry
+        the SMTP Message-ID.  Uses raw SQL to stay within module boundaries.
+        Returns the outbound_messages.id UUID on match, None when unmatched.
+        """
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            text(
+                "SELECT id FROM outbound_messages"
+                " WHERE tenant_id = :tid AND provider_message_id = :pid"
+                " LIMIT 1"
+            ),
+            {"tid": str(ctx.org_id), "pid": provider_message_id},
         )
         row = result.one_or_none()
         return uuid.UUID(str(row[0])) if row else None
@@ -497,4 +562,5 @@ def _to_message_out(msg: InboxMessage, body_snippet: str | None) -> InboxMessage
         classified_at=msg.classified_at,
         classification_model=msg.classification_model,
         synced_at=msg.synced_at,
+        channel=msg.channel,
     )

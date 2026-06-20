@@ -53,6 +53,7 @@ from corpmind.core.tenancy import get_tenant_context
 from corpmind.modules.crm.events import (
     AutomationFailed,
     ContactBounced,
+    ContactUnsubscribed,
     FollowUpRequired,
     FollowUpScheduled,
     LeadCold,
@@ -86,6 +87,7 @@ ACTIVITY_AUTO_REPLY = "auto_reply_logged"
 ACTIVITY_UNKNOWN = "unknown_intent_logged"
 ACTIVITY_AUTOMATION_FAILED = "automation_failed"
 ACTIVITY_AUTOMATION_SKIPPED = "automation_skipped"
+ACTIVITY_WHATSAPP_UNSUBSCRIBED = "whatsapp_unsubscribed"
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,8 @@ class ReplyAutomationService:
         tenant_id: uuid.UUID,
         intent: str,
         outbound_message_id: uuid.UUID | None,
+        contact_id_override: uuid.UUID | None = None,
+        workspace_id_override: uuid.UUID | None = None,
     ) -> AutomationResult:
         """Process one ReplyClassified event.
 
@@ -130,6 +134,11 @@ class ReplyAutomationService:
         before invoking — the service inherits both via get_tenant_context()
         and the existing session.  `tenant_id` parameter is used to assert
         the context matches (defense-in-depth).
+
+        `contact_id_override` / `workspace_id_override`: set by the WA inbound
+        worker for fresh conversations where no outbound_message_id exists but
+        the contact was already resolved via phone-number lookup.  Both must be
+        provided together; providing only one is treated as no_outbound_match.
         """
         ctx = get_tenant_context()
         if ctx.org_id != tenant_id:
@@ -163,8 +172,25 @@ class ReplyAutomationService:
             )
             return AutomationResult(outcome="already_applied")
 
-        # ── 2. Validation gates ─────────────────────────────────────────────
-        if outbound_message_id is None:
+        # ── 2. Validation gates — contact + workspace resolution ────────────
+        if outbound_message_id is not None:
+            outbound = await self._resolve_outbound(outbound_message_id)
+            if outbound is None:
+                return await self._fail(
+                    inbox_message_id=inbox_message_id,
+                    intent=intent,
+                    reason="contact_not_found",
+                    lead_id=None,
+                    contact_id=None,
+                    workspace_id=None,
+                    outbound_message_id=outbound_message_id,
+                )
+            contact_id, resolved_workspace_id = outbound
+        elif contact_id_override is not None and workspace_id_override is not None:
+            # Fresh conversation — caller pre-resolved via phone lookup.
+            contact_id = contact_id_override
+            resolved_workspace_id = workspace_id_override
+        else:
             return await self._fail(
                 inbox_message_id=inbox_message_id,
                 intent=intent,
@@ -175,19 +201,6 @@ class ReplyAutomationService:
                 outbound_message_id=None,
             )
 
-        outbound = await self._resolve_outbound(outbound_message_id)
-        if outbound is None:
-            return await self._fail(
-                inbox_message_id=inbox_message_id,
-                intent=intent,
-                reason="contact_not_found",
-                lead_id=None,
-                contact_id=None,
-                workspace_id=None,
-                outbound_message_id=outbound_message_id,
-            )
-        contact_id, resolved_workspace_id = outbound
-
         # The lead lookup is tenant-wide because the outbound→workspace mapping
         # is unreliable for ad-hoc sends (no campaign).  RLS still enforces the
         # tenant boundary; we just allow any workspace within this tenant.
@@ -197,10 +210,19 @@ class ReplyAutomationService:
         # source of truth for where the activity / follow-up should live.
         workspace_id = lead.workspace_id if lead is not None else resolved_workspace_id
 
-        # `bounce` bypasses the lead-required gate — we still want to flag
-        # the contact as unreachable even if no live lead exists.
+        # `bounce` and `unsubscribe` bypass the lead-required gate — we want to
+        # act on the contact even when no active lead exists.
         if intent == "bounce":
             return await self._handle_bounce(
+                inbox_message_id=inbox_message_id,
+                contact_id=contact_id,
+                workspace_id=workspace_id,
+                outbound_message_id=outbound_message_id,
+                lead=lead,
+            )
+
+        if intent == "unsubscribe":
+            return await self._handle_unsubscribe(
                 inbox_message_id=inbox_message_id,
                 contact_id=contact_id,
                 workspace_id=workspace_id,
@@ -545,6 +567,53 @@ class ReplyAutomationService:
             ContactBounced(
                 contact_id=contact_id,
                 tenant_id=ctx.org_id,
+                source_inbox_message_id=inbox_message_id,
+            )
+        )
+        return AutomationResult(outcome="applied", activity_id=activity.id)
+
+    async def _handle_unsubscribe(
+        self,
+        *,
+        inbox_message_id: uuid.UUID,
+        contact_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        outbound_message_id: uuid.UUID | None,
+        lead=None,
+    ) -> AutomationResult:
+        """Clear WhatsApp opt-in on the contact; log activity.
+
+        Uses raw SQL — hr_contacts lives in the hr_discovery module and we are
+        forbidden from importing its ORM model or repo.  Nullifying
+        whatsapp_opt_in_at is idempotent: running twice produces the same state.
+        ComplianceGuard's opt-in check sees NULL = not opted in and will block
+        future WA sends to this contact.
+        """
+        ctx = get_tenant_context()
+        await self._session.execute(
+            text(
+                "UPDATE hr_contacts SET whatsapp_opt_in_at = NULL"
+                " WHERE id = :cid AND tenant_id = :tid"
+            ),
+            {"cid": str(contact_id), "tid": str(ctx.org_id)},
+        )
+
+        activity = await self._write_activity(
+            type=ACTIVITY_WHATSAPP_UNSUBSCRIBED,
+            summary="WhatsApp unsubscribe request — opt-in cleared.",
+            lead_id=lead.id if lead else None,
+            contact_id=contact_id,
+            workspace_id=workspace_id,
+            inbox_message_id=inbox_message_id,
+            outbound_message_id=outbound_message_id,
+        )
+        await self._session.commit()
+
+        _emit(
+            ContactUnsubscribed(
+                contact_id=contact_id,
+                tenant_id=ctx.org_id,
+                channel="whatsapp",
                 source_inbox_message_id=inbox_message_id,
             )
         )

@@ -95,6 +95,8 @@ class InboxMessageOut(BaseModel):
     classified_at: datetime | None = None
     classification_model: str | None = None
     synced_at: datetime
+    # Sprint 17A: "email" | "whatsapp" — NULL on pre-17A rows (treat as email).
+    channel: str | None = None
 
 
 # ── Read-only list DTOs (Sprint 5 prerequisite layer) ─────────────────────────

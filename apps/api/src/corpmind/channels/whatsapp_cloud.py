@@ -145,18 +145,22 @@ class WhatsAppCloudAdapter:
                     error_detail=str(exc),
                 )
 
-    async def fetch_status(self, message_id: str) -> DeliveryStatus:
+    async def fetch_status(self, _message_id: str) -> DeliveryStatus:
         # Delivery status arrives via webhook — Meta has no polling endpoint.
         return DeliveryStatus.SENT
 
     async def handle_webhook(
         self, payload: bytes, headers: Headers
     ) -> list[InboundEvent]:
-        """Parse a Meta webhook for delivery receipt events.
+        """Parse a Meta webhook for delivery receipts and inbound text messages.
 
-        Verifies X-Hub-Signature-256 BEFORE parsing.  Each status event is
-        replay-protected via a Redis NX lock keyed by the Meta event id (24h TTL).
-        Inbound messages are intentionally dropped (Sprint 17 scope).
+        Verifies X-Hub-Signature-256 BEFORE parsing.  Every event is replay-
+        protected via a Redis NX lock keyed by the Meta event id (24h TTL).
+
+        Delivery receipts → event_type="delivery_report"
+        Inbound text messages → event_type="message_received"
+        Non-text inbound types (image, video, audio, sticker, document, …)
+          are logged and skipped — Sprint 17A supports text only.
         """
         self._verify_hmac(payload, headers)
 
@@ -170,6 +174,8 @@ class WhatsAppCloudAdapter:
         for entry in body.get("entry", []):
             for change in entry.get("changes", []):
                 value = change.get("value", {})
+
+                # ── Delivery receipts ─────────────────────────────────────────
                 for status in value.get("statuses", []):
                     event_id = status.get("id")
                     if event_id and self._is_duplicate(event_id):
@@ -178,6 +184,30 @@ class WhatsAppCloudAdapter:
                     event = self._parse_status(status, payload)
                     if event:
                         events.append(event)
+
+                # ── Inbound messages ──────────────────────────────────────────
+                for message in value.get("messages", []):
+                    msg_type = message.get("type", "")
+                    msg_id = message.get("id")
+                    if msg_type != "text":
+                        log.info(
+                            "whatsapp.webhook.message_type_skipped",
+                            message_type=msg_type,
+                            event_id=msg_id,
+                        )
+                        continue
+                    if not msg_id:
+                        log.warning("whatsapp.webhook.inbound_missing_id")
+                        continue
+                    if self._is_duplicate(msg_id):
+                        log.info(
+                            "whatsapp.webhook.inbound_replay_skip", event_id=msg_id
+                        )
+                        continue
+                    event = self._parse_inbound_message(message, value, payload)
+                    if event:
+                        events.append(event)
+
         return events
 
     def _is_duplicate(self, event_id: str) -> bool:
@@ -259,6 +289,48 @@ class WhatsAppCloudAdapter:
                 "delivery_status": delivery_status.value,
                 "timestamp": status.get("timestamp"),
                 "errors": status.get("errors", []),
+            },
+        )
+
+    def _parse_inbound_message(
+        self, message: dict, value: dict, raw: bytes
+    ) -> InboundEvent | None:
+        """Convert a Meta inbound text message object to a normalised InboundEvent.
+
+        Extracts the fields needed for InboxMessage persistence:
+          - provider_message_id / provider_event_id: the inbound wamid
+          - recipient_address: sender's E.164 phone number
+          - metadata.text_body: the message text (max used by caller for snippet)
+          - metadata.context_id: wamid of the outbound message being replied to
+            (present when contact replies to one of our messages; absent for
+            fresh conversations initiated by the contact — Sprint 17B scope)
+          - metadata.contact_name: display name from Meta contacts[] array
+          - metadata.timestamp: Unix epoch string from Meta
+          - metadata.phone_number_id: the WABA phone number that received the msg
+        """
+        msg_id = message.get("id")
+        if not msg_id:
+            return None
+        text_body = (message.get("text") or {}).get("body", "")
+        context = message.get("context") or {}
+        contacts = value.get("contacts", [])
+        contact_name: str | None = None
+        if contacts:
+            contact_name = contacts[0].get("profile", {}).get("name")
+        meta = value.get("metadata") or {}
+        return InboundEvent(
+            event_type="message_received",
+            provider_event_id=msg_id,
+            provider_message_id=msg_id,
+            channel="whatsapp",
+            recipient_address=message.get("from"),
+            raw_payload=raw,
+            metadata={
+                "text_body": text_body,
+                "context_id": context.get("id"),
+                "contact_name": contact_name,
+                "timestamp": message.get("timestamp"),
+                "phone_number_id": meta.get("phone_number_id"),
             },
         )
 

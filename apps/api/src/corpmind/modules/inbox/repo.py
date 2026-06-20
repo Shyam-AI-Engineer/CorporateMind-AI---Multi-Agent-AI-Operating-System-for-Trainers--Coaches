@@ -93,6 +93,24 @@ class InboxConnectionRepo:
             .values(**values)
         )
 
+    async def find_wa_connection(
+        self, workspace_id: uuid.UUID
+    ) -> InboxConnection | None:
+        """Return the system WhatsApp InboxConnection for a workspace, or None.
+
+        Used by InboxService.get_or_create_wa_connection() to avoid duplicate
+        WA connection rows.  Scoped to the current tenant via TenantContext.
+        """
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(InboxConnection).where(
+                InboxConnection.tenant_id == ctx.org_id,
+                InboxConnection.workspace_id == workspace_id,
+                InboxConnection.provider == "whatsapp",
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def delete(self, connection_id: uuid.UUID) -> bool:
         """Delete a connection owned by the current tenant.
 

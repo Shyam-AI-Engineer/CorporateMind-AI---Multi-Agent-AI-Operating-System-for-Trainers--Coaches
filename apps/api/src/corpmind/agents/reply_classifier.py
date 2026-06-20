@@ -41,6 +41,7 @@ ReplyIntent = Literal[
     "out_of_office",
     "bounce",
     "auto_reply",
+    "unsubscribe",
     "unknown",
 ]
 
@@ -52,6 +53,7 @@ _ALLOWED_INTENTS: frozenset[str] = frozenset(
         "out_of_office",
         "bounce",
         "auto_reply",
+        "unsubscribe",
         "unknown",
     }
 )
@@ -157,6 +159,7 @@ class ReplyClassifierAgent(BaseAgent):
         tenant_id: uuid.UUID,
         request_id: str,
         run_id: str | None = None,
+        prompt_name: str = "inbox.classify_reply",
     ) -> ClassificationResult:
         """Classify a single inbound reply.
 
@@ -178,7 +181,7 @@ class ReplyClassifierAgent(BaseAgent):
         """
         response = await self._euri.chat(
             task="classify_reply",
-            prompt_name="inbox.classify_reply",
+            prompt_name=prompt_name,
             prompt_inputs={
                 "subject": subject or "",
                 "body_snippet": (body_snippet or "")[:500],

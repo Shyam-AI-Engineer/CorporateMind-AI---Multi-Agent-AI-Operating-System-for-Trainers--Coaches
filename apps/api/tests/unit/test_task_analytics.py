@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 from unittest.mock import patch
 
 from corpmind.workers.tasks.analytics import (
+    _compute_tenant_rollup,
     compute_daily_rollup,
     prune_semantic_cache,
     run_campaign_optimizer,
@@ -59,6 +61,34 @@ class TestRunCampaignOptimizer:
         with patch("corpmind.workers.tasks.analytics.log") as mock_log:
             run_campaign_optimizer.run()
         mock_log.info.assert_called_once_with("analytics.optimizer.start")
+
+
+# ── WA reply count (Sprint 17B) ───────────────────────────────────────────────
+
+class TestWAReplyCountQuery:
+    def test_wa_replied_query_targets_inbox_messages(self):
+        """_compute_tenant_rollup source must query inbox_messages for WA replies.
+
+        Sprint 17A had a placeholder 'outreach_replied=0'.  Sprint 17B wires the
+        real query.  This test guards against regression back to a hardcoded zero.
+        """
+        source = inspect.getsource(_compute_tenant_rollup)
+        assert "inbox_messages" in source, (
+            "WA reply count must query inbox_messages, not use a hardcoded 0"
+        )
+        assert "reply_intent IS NOT NULL" in source, (
+            "WA reply count must filter on reply_intent IS NOT NULL"
+        )
+        assert "wa_replied" in source, (
+            "WA reply count result must be stored in wa_replied variable"
+        )
+
+    def test_wa_replied_not_hardcoded_zero(self):
+        """Ensure the hardcoded-zero Sprint 17A placeholder is gone."""
+        source = inspect.getsource(_compute_tenant_rollup)
+        assert "outreach_replied=0" not in source, (
+            "Sprint 17B removes the hardcoded-zero placeholder"
+        )
 
 
 # ── prune_semantic_cache ───────────────────────────────────────────────────────

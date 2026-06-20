@@ -205,6 +205,11 @@ class InboxMessage(TenantBase):
         String(100), nullable=True
     )
 
+    # ── Channel ───────────────────────────────────────────────────────────────
+    # "email" for Gmail-synced messages; "whatsapp" for Meta Cloud API inbound.
+    # NULL on rows created before Sprint 17A (all email — safe to treat as email).
+    channel: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

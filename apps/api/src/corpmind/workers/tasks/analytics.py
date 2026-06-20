@@ -334,6 +334,17 @@ async def _compute_tenant_rollup(
                 ai_spend_inr=0.0,  # model_runs table not yet wired — Phase 2
             )
 
+            wa_replied_row = await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM inbox_messages"
+                    " WHERE tenant_id = :tid AND channel = 'whatsapp'"
+                    " AND reply_intent IS NOT NULL"
+                    " AND received_at::date = :d"
+                ),
+                {"tid": tenant_id, "d": d_str},
+            )
+            wa_replied = scalar(wa_replied_row.scalar_one())
+
             # ── Upsert per-channel WhatsApp row ──────────────────────────────────
             # CRM / proposal metrics are cross-channel and not meaningful per channel;
             # set them to zero in the channel-specific row.
@@ -344,7 +355,7 @@ async def _compute_tenant_rollup(
                 outreach_sent=wa_sent,
                 outreach_delivered=wa_delivered,
                 outreach_opened=wa_opened,
-                outreach_replied=0,  # WA reply pipeline is Sprint 17
+                outreach_replied=wa_replied,
                 compliance_blocks=wa_blocks,
                 meetings_scheduled=0,
                 meetings_completed=0,
