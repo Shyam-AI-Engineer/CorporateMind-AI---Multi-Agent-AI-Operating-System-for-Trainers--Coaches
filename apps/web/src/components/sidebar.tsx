@@ -17,6 +17,13 @@ import {
   UserCircle,
   Mail,
   BarChart2,
+  Activity,
+  Briefcase,
+  UsersRound,
+  ClipboardList,
+  Bell,
+  GitBranch,
+  PlayCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -39,7 +46,14 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/hr",         label: "HR Contacts",     icon: Users },
   { href: "/proposals",  label: "Proposals",       icon: FileText },
   { href: "/analytics",  label: "Analytics",       icon: BarChart2 },
-  { href: "/social",     label: "Social",          icon: Share2, soon: true },
+  { href: "/health",      label: "Health Center",  icon: Activity },
+  { href: "/operations",  label: "Operations",     icon: Briefcase },
+  { href: "/approvals",      label: "Approvals",      icon: ClipboardList },
+  { href: "/notifications",  label: "Notifications",  icon: Bell },
+  { href: "/workflows",       label: "Workflows",      icon: GitBranch },
+  { href: "/workflow-runs",  label: "Workflow Runs",  icon: PlayCircle },
+  { href: "/team",           label: "Team",           icon: UsersRound },
+  { href: "/social",      label: "Social",         icon: Share2, soon: true },
 ];
 
 interface SidebarProps {

@@ -72,6 +72,7 @@ export const REPLY_INTENTS = [
   "out_of_office",
   "bounce",
   "auto_reply",
+  "unsubscribe",
   "unknown",
 ] as const;
 
@@ -89,6 +90,7 @@ export const INTENT_CONFIG: Record<
   out_of_office:  { label: "Out of office",   variant: "secondary" },
   bounce:         { label: "Bounce",          variant: "destructive" },
   auto_reply:     { label: "Auto-reply",      variant: "secondary" },
+  unsubscribe:    { label: "Unsubscribe",     variant: "destructive" },
   unknown:        { label: "Unknown",         variant: "outline" },
 };
 

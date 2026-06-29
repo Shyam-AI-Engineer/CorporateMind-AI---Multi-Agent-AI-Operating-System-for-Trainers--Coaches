@@ -30,7 +30,9 @@ from corpmind.core.tenancy import TenantContext, get_tenant_context
 from corpmind.modules.compliance.service import ComplianceService
 from corpmind.modules.crm.schemas import LeadOut
 from corpmind.modules.proposals.events import (
+    ProposalAccepted,
     ProposalApproved,
+    ProposalDeclined,
     ProposalDeliveryBlocked,
     ProposalDeliveryQueued,
     ProposalGenerated,
@@ -39,6 +41,8 @@ from corpmind.modules.proposals.events import (
 from corpmind.modules.proposals.models import Proposal
 from corpmind.modules.proposals.repo import ProposalRepo
 from corpmind.modules.proposals.schemas import (
+    AcceptProposalRequest,
+    DeclineProposalRequest,
     GenerateProposalRequest,
     ProposalListOut,
     ProposalOut,
@@ -104,6 +108,9 @@ class ProposalService:
             status="draft",
             content=content,
             approval_status="pending_approval",
+            # Sprint 18A: attribute the proposal to the lead for revenue tracing
+            lead_id=req.lead_id,
+            expected_value_inr=req.expected_value_inr,
         )
         await self._repo.create(proposal)
 
@@ -430,6 +437,187 @@ class ProposalService:
         out = ProposalOut.model_validate(proposal)
         out.delivery_status = send_resp.status
         return out
+
+    # ── Client response ─────────────────────────────────────────────────────────
+
+    async def record_acceptance(
+        self, proposal_id: uuid.UUID, req: AcceptProposalRequest
+    ) -> ProposalOut:
+        """Record the client's acceptance of a sent proposal.
+
+        Guards: proposal must be in status='sent' with no prior client response.
+        Sets client_status='accepted', client_accepted_at, actual_value_inr.
+        If proposal.lead_id is set, advances the lead to 'booked' (idempotent).
+        Writes a CRM activity and audit event; emits ProposalAccepted.
+        """
+        ctx = get_tenant_context()
+        proposal = await self._require_proposal_for_update(proposal_id)
+
+        if proposal.status != "sent":
+            raise ConflictError(
+                f"Proposal {proposal_id} cannot be accepted "
+                f"(status must be 'sent', current: '{proposal.status}')."
+            )
+        if proposal.client_status is not None:
+            raise ConflictError(
+                f"Proposal {proposal_id} already has a client response "
+                f"(client_status: '{proposal.client_status}')."
+            )
+
+        now = datetime.now(UTC)
+        update_values: dict[str, object] = {
+            "client_status": "accepted",
+            "client_accepted_at": now,
+            "actual_value_inr": req.actual_value_inr,
+        }
+        if req.expected_value_inr is not None:
+            update_values["expected_value_inr"] = req.expected_value_inr
+
+        await self._repo.update_fields(proposal_id, **update_values)
+
+        # Advance lead to 'booked' if it isn't already terminal.
+        # Raw SQL — no cross-module ORM import (module boundary rule).
+        if proposal.lead_id is not None:
+            await self._session.execute(
+                text(
+                    "UPDATE leads SET stage = 'booked', booked_at = now(),"
+                    " updated_at = now()"
+                    " WHERE id = :lid AND tenant_id = :tid"
+                    " AND stage NOT IN ('booked', 'lost')"
+                ),
+                {"lid": str(proposal.lead_id), "tid": str(ctx.org_id)},
+            )
+
+        value_str = f"₹{req.actual_value_inr:,.0f}"
+        await self._session.execute(
+            text(
+                "INSERT INTO crm_activities"
+                " (id, tenant_id, workspace_id, contact_id, type, summary,"
+                "  source_outbound_message_id, created_at)"
+                " VALUES (:id, :tid, :wsid, :cid, 'proposal_accepted', :summary,"
+                "  :omid, now())"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "tid": str(ctx.org_id),
+                "wsid": str(proposal.workspace_id),
+                "cid": str(proposal.contact_id),
+                "summary": f"Booking confirmed — {value_str}",
+                "omid": str(proposal.outbound_message_id) if proposal.outbound_message_id else None,
+            },
+        )
+
+        await self._compliance.record_audit_event(
+            event_type="proposal.accepted",
+            outcome="allowed",
+            event_data={
+                "proposal_id": str(proposal_id),
+                "actual_value_inr": str(req.actual_value_inr),
+                "contact_id": str(proposal.contact_id),
+            },
+        )
+        await self._session.commit()
+
+        log.info(
+            "proposals.accepted",
+            proposal_id=str(proposal_id),
+            actual_value_inr=str(req.actual_value_inr),
+            contact_id=str(proposal.contact_id),
+        )
+        _log_event(ProposalAccepted(
+            proposal_id=proposal_id,
+            tenant_id=ctx.org_id,
+            contact_id=proposal.contact_id,
+            actual_value_inr=req.actual_value_inr,
+        ))
+
+        proposal.client_status = "accepted"
+        proposal.client_accepted_at = now
+        proposal.actual_value_inr = req.actual_value_inr
+        if req.expected_value_inr is not None:
+            proposal.expected_value_inr = req.expected_value_inr
+        return ProposalOut.model_validate(proposal)
+
+    async def record_declination(
+        self, proposal_id: uuid.UUID, req: DeclineProposalRequest
+    ) -> ProposalOut:
+        """Record the client's declination of a sent proposal.
+
+        Guards: proposal must be in status='sent' with no prior client response.
+        Sets client_status='declined', client_declined_at.
+        Writes a CRM activity and audit event; emits ProposalDeclined.
+        The lead stage is NOT changed — a declined proposal leaves the lead in
+        whatever stage it was in so the trainer can re-engage.
+        """
+        ctx = get_tenant_context()
+        proposal = await self._require_proposal_for_update(proposal_id)
+
+        if proposal.status != "sent":
+            raise ConflictError(
+                f"Proposal {proposal_id} cannot be declined "
+                f"(status must be 'sent', current: '{proposal.status}')."
+            )
+        if proposal.client_status is not None:
+            raise ConflictError(
+                f"Proposal {proposal_id} already has a client response "
+                f"(client_status: '{proposal.client_status}')."
+            )
+
+        now = datetime.now(UTC)
+        await self._repo.update_fields(
+            proposal_id,
+            client_status="declined",
+            client_declined_at=now,
+        )
+
+        summary = "Client declined proposal"
+        if req.reason:
+            summary = f"Client declined proposal: {req.reason}"
+
+        await self._session.execute(
+            text(
+                "INSERT INTO crm_activities"
+                " (id, tenant_id, workspace_id, contact_id, type, summary,"
+                "  source_outbound_message_id, created_at)"
+                " VALUES (:id, :tid, :wsid, :cid, 'proposal_declined', :summary,"
+                "  :omid, now())"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "tid": str(ctx.org_id),
+                "wsid": str(proposal.workspace_id),
+                "cid": str(proposal.contact_id),
+                "summary": summary,
+                "omid": str(proposal.outbound_message_id) if proposal.outbound_message_id else None,
+            },
+        )
+
+        await self._compliance.record_audit_event(
+            event_type="proposal.declined",
+            outcome="allowed",
+            event_data={
+                "proposal_id": str(proposal_id),
+                "reason": req.reason or "",
+                "contact_id": str(proposal.contact_id),
+            },
+        )
+        await self._session.commit()
+
+        log.info(
+            "proposals.declined",
+            proposal_id=str(proposal_id),
+            contact_id=str(proposal.contact_id),
+        )
+        _log_event(ProposalDeclined(
+            proposal_id=proposal_id,
+            tenant_id=ctx.org_id,
+            contact_id=proposal.contact_id,
+            reason=req.reason,
+        ))
+
+        proposal.client_status = "declined"
+        proposal.client_declined_at = now
+        return ProposalOut.model_validate(proposal)
 
     # ── Helpers ─────────────────────────────────────────────────────────────────
 

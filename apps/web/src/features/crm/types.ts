@@ -151,6 +151,8 @@ export const ACTIVITY_CONFIG: Record<
   // Sprint 14 — booking webhook activities
   booking_confirmed:        { label: "Meeting auto-scheduled", icon: "trending-up" },
   meeting_rescheduled:      { label: "Meeting rescheduled",    icon: "clock" },
+  // Sprint 17B — WhatsApp unsubscribe
+  whatsapp_unsubscribed:    { label: "WA opt-out",             icon: "mail-x" },
 };
 
 export const FOLLOW_UP_STATUS_CONFIG: Record<

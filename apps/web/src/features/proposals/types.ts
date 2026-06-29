@@ -16,6 +16,13 @@ export interface Proposal {
   // Sprint 12B — delivery tracking
   outbound_message_id: string | null;
   delivery_status: string | null; // queued | sent | blocked | failed
+  // Sprint 18A — revenue attribution + client response
+  lead_id: string | null;
+  expected_value_inr: number | null;
+  actual_value_inr: number | null;
+  client_status: string | null; // null | accepted | declined
+  client_accepted_at: string | null;
+  client_declined_at: string | null;
 }
 
 export interface ProposalListOut {
@@ -33,6 +40,17 @@ export interface GenerateProposalRequest {
 export interface RejectProposalRequest {
   proposalId: string;
   reason: string;
+}
+
+export interface AcceptProposalRequest {
+  proposalId: string;
+  actual_value_inr: number;
+  expected_value_inr?: number;
+}
+
+export interface DeclineProposalRequest {
+  proposalId: string;
+  reason?: string;
 }
 
 export const PROPOSAL_STATUS_CONFIG: Record<
@@ -60,4 +78,12 @@ export const DELIVERY_STATUS_CONFIG: Record<
   sent:    { label: "Sent",    variant: "success"     },
   blocked: { label: "Blocked", variant: "destructive" },
   failed:  { label: "Failed",  variant: "destructive" },
+};
+
+export const CLIENT_STATUS_CONFIG: Record<
+  string,
+  { label: string; variant: "default" | "secondary" | "success" | "warning" | "destructive" | "outline" }
+> = {
+  accepted: { label: "Accepted", variant: "success"     },
+  declined: { label: "Declined", variant: "destructive" },
 };

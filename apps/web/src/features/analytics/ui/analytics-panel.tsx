@@ -11,6 +11,7 @@ import {
 import { AlertCircle, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWorkspace } from "@/hooks/use-workspace";
 import {
   useAnalyticsFunnel,
@@ -18,6 +19,23 @@ import {
   useAnalyticsTrend,
 } from "@/features/analytics/api/use-analytics";
 import { WhatsAppMetricsCard } from "@/features/analytics/ui/whatsapp-metrics-card";
+import { CampaignROIPanel } from "@/features/analytics/ui/campaign-roi-panel";
+import { TopTopicsPanel } from "@/features/analytics/ui/top-topics-panel";
+import { TopIndustriesPanel } from "@/features/analytics/ui/top-industries-panel";
+import { PricingCalibrationCard } from "@/features/analytics/ui/pricing-calibration-card";
+import { RecommendationsPanel } from "@/features/analytics/ui/recommendations-panel";
+import { InsightsPanel } from "@/features/analytics/ui/insights-panel";
+import { RecommendationHealthPanel } from "@/features/analytics/ui/recommendation-health-panel";
+import { RecommendationReviewPanel } from "@/features/analytics/ui/recommendation-review-panel";
+import { CalibrationAnalysisPanel } from "@/features/analytics/ui/calibration-analysis-panel";
+import { ReliabilityDriftPanel } from "@/features/analytics/ui/reliability-drift-panel";
+import { LifecycleObservatoryPanel } from "@/features/analytics/ui/lifecycle-observatory-panel";
+import { PortfolioCoveragePanel } from "@/features/analytics/ui/portfolio-coverage-panel";
+import { RecommendationEvidencePanel } from "@/features/analytics/ui/recommendation-evidence-panel";
+import { RecommendationActionCenter } from "@/features/analytics/ui/recommendation-action-center";
+import { RecommendationWorkQueue } from "@/features/analytics/ui/recommendation-work-queue";
+import { RecommendationOutcomesPanel } from "@/features/analytics/ui/recommendation-outcomes-panel";
+import { RecommendationLearningPanel } from "@/features/analytics/ui/recommendation-learning-panel";
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
@@ -81,31 +99,28 @@ function FunnelRow({
   );
 }
 
-// ── Main panel ────────────────────────────────────────────────────────────────
+// ── Overview tab ──────────────────────────────────────────────────────────────
 
-export function AnalyticsPanel() {
-  const { workspaceId } = useWorkspace();
-
+function OverviewTab() {
   const summary = useAnalyticsSummary(30);
   const trend = useAnalyticsTrend(30);
+  const { workspaceId } = useWorkspace();
   const funnel = useAnalyticsFunnel(workspaceId);
 
   const s = summary.data;
   const f = funnel.data;
   const trendRows = trend.data ?? [];
 
-  // Reverse so chart goes oldest → newest left-to-right
   const chartData = [...trendRows].reverse().map((r) => ({
-    date: r.rollup_date.slice(5), // MM-DD
+    date: r.rollup_date.slice(5),
     sent: r.outreach_sent,
     replied: r.outreach_replied,
     booked: r.leads_booked,
   }));
 
   const summaryLoading = summary.isLoading;
-  const summaryError = summary.isError;
 
-  if (summaryError) {
+  if (summary.isError) {
     return (
       <div className="flex items-center gap-2 text-sm text-destructive">
         <AlertCircle className="h-4 w-4 shrink-0" />
@@ -142,6 +157,24 @@ export function AnalyticsPanel() {
           label="Bookings (30d)"
           value={s?.leads_booked ?? "—"}
           sub={`${s ? (s.booking_rate * 100).toFixed(1) : 0}% close rate`}
+          isLoading={summaryLoading}
+        />
+        <KpiCard
+          label="Accepted (30d)"
+          value={s?.proposals_accepted ?? "—"}
+          sub={s ? `${(s.win_rate * 100).toFixed(1)}% win rate` : undefined}
+          isLoading={summaryLoading}
+        />
+        <KpiCard
+          label="Win Rate (30d)"
+          value={s ? `${(s.win_rate * 100).toFixed(1)}%` : "—"}
+          sub={`${s?.proposals_accepted ?? 0} of ${s?.proposals_sent ?? 0} sent`}
+          isLoading={summaryLoading}
+        />
+        <KpiCard
+          label="Revenue Closed (30d)"
+          value={s ? `₹${s.closed_revenue_inr.toLocaleString("en-IN")}` : "—"}
+          sub="from accepted proposals"
           isLoading={summaryLoading}
         />
       </div>
@@ -218,6 +251,17 @@ export function AnalyticsPanel() {
               <FunnelRow label="Meetings" value={f.meetings} max={funnelMax} />
               <FunnelRow label="Proposals" value={f.proposals} max={funnelMax} />
               <FunnelRow label="Bookings" value={f.bookings} max={funnelMax} />
+              <FunnelRow label="Proposals Accepted" value={f.proposals_accepted} max={funnelMax} />
+              <FunnelRow
+                label={`Pipeline Value (₹${f.pipeline_value_inr.toLocaleString("en-IN")})`}
+                value={f.proposals_accepted}
+                max={f.proposals}
+              />
+              <FunnelRow
+                label={`Closed Revenue (₹${f.closed_revenue_inr.toLocaleString("en-IN")})`}
+                value={f.proposals_accepted}
+                max={f.proposals}
+              />
             </>
           )}
         </CardContent>
@@ -226,5 +270,194 @@ export function AnalyticsPanel() {
       {/* WhatsApp delivery KPIs */}
       <WhatsAppMetricsCard days={30} />
     </div>
+  );
+}
+
+// ── Main panel ────────────────────────────────────────────────────────────────
+
+export function AnalyticsPanel() {
+  const { workspaceId } = useWorkspace();
+
+  return (
+    <Tabs defaultValue="overview" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="campaigns">Campaign ROI</TabsTrigger>
+        <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
+        <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
+        <TabsTrigger value="insights">Insights</TabsTrigger>
+        <TabsTrigger value="rec-health">Recommendation Health</TabsTrigger>
+        <TabsTrigger value="rec-review">Recommendation Review</TabsTrigger>
+        <TabsTrigger value="calibration-analysis">Calibration Analysis</TabsTrigger>
+        <TabsTrigger value="reliability-drift">Reliability &amp; Drift</TabsTrigger>
+        <TabsTrigger value="lifecycle-observatory">Lifecycle Observatory</TabsTrigger>
+        <TabsTrigger value="portfolio-coverage">Portfolio &amp; Coverage</TabsTrigger>
+        <TabsTrigger value="recommendation-evidence">Recommendation Evidence</TabsTrigger>
+        <TabsTrigger value="recommendation-action-center">Recommendation Action Center</TabsTrigger>
+        <TabsTrigger value="recommendation-work-queue">Recommendation Work Queue</TabsTrigger>
+        <TabsTrigger value="recommendation-outcomes">Recommendation Outcomes</TabsTrigger>
+        <TabsTrigger value="recommendation-learning">Recommendation Learning</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="overview">
+        <OverviewTab />
+      </TabsContent>
+
+      <TabsContent value="campaigns">
+        {workspaceId ? (
+          <CampaignROIPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view campaign ROI.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="intelligence">
+        {workspaceId ? (
+          <div className="grid gap-6 md:grid-cols-2">
+            <TopTopicsPanel workspaceId={workspaceId} />
+            <TopIndustriesPanel workspaceId={workspaceId} />
+            <div className="md:col-span-2">
+              <PricingCalibrationCard workspaceId={workspaceId} />
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view intelligence.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="recommendations">
+        {workspaceId ? (
+          <RecommendationsPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view recommendations.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="insights">
+        {workspaceId ? (
+          <InsightsPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view insights.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="rec-health">
+        {workspaceId ? (
+          <RecommendationHealthPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view recommendation health.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="rec-review">
+        {workspaceId ? (
+          <RecommendationReviewPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view recommendation review.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="calibration-analysis">
+        {workspaceId ? (
+          <CalibrationAnalysisPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view calibration analysis.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="reliability-drift">
+        {workspaceId ? (
+          <ReliabilityDriftPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view reliability and drift.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="lifecycle-observatory">
+        {workspaceId ? (
+          <LifecycleObservatoryPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view the lifecycle observatory.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="portfolio-coverage">
+        {workspaceId ? (
+          <PortfolioCoveragePanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view portfolio and coverage.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="recommendation-evidence">
+        {workspaceId ? (
+          <RecommendationEvidencePanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view recommendation evidence.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="recommendation-action-center">
+        {workspaceId ? (
+          <RecommendationActionCenter workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to manage recommendation actions.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="recommendation-work-queue">
+        {workspaceId ? (
+          <RecommendationWorkQueue workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to manage the recommendation work queue.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="recommendation-outcomes">
+        {workspaceId ? (
+          <RecommendationOutcomesPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view recommendation outcomes.
+          </p>
+        )}
+      </TabsContent>
+
+      <TabsContent value="recommendation-learning">
+        {workspaceId ? (
+          <RecommendationLearningPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Select a workspace to view recommendation learning.
+          </p>
+        )}
+      </TabsContent>
+    </Tabs>
   );
 }

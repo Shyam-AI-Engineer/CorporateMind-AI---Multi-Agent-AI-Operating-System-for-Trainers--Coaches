@@ -15,10 +15,22 @@ from corpmind.workers.tasks.analytics import (
 
 # ── compute_daily_rollup ───────────────────────────────────────────────────────
 
+def _make_fan_out_return(rollup_date_str: str) -> dict:
+    return {"rollup_date": rollup_date_str, "enqueued": 0, "failed": 0}
+
+
 class TestComputeDailyRollup:
     def test_returns_dict_with_rollup_date(self):
-        """Task now fans out and returns a summary dict, not None."""
-        result = compute_daily_rollup.run()
+        """Task now fans out and returns a summary dict, not None.
+
+        asyncio.run is mocked so the test does not require a live DB or
+        event-loop (the session-scoped asyncpg loop conflicts with asyncio.run).
+        """
+        from datetime import date, timedelta
+        yesterday = str(date.today() - timedelta(days=1))
+        with patch("corpmind.workers.tasks.analytics.asyncio") as mock_aio:
+            mock_aio.run.return_value = _make_fan_out_return(yesterday)
+            result = compute_daily_rollup.run()
         assert isinstance(result, dict)
         assert "rollup_date" in result
         assert "enqueued" in result
@@ -26,16 +38,27 @@ class TestComputeDailyRollup:
 
     def test_logs_start_event_as_first_call(self):
         """First log call must be the start event with the date kwarg."""
-        with patch("corpmind.workers.tasks.analytics.log") as mock_log:
+        from datetime import date, timedelta
+        yesterday = str(date.today() - timedelta(days=1))
+        with (
+            patch("corpmind.workers.tasks.analytics.log") as mock_log,
+            patch("corpmind.workers.tasks.analytics.asyncio") as mock_aio,
+        ):
+            mock_aio.run.return_value = _make_fan_out_return(yesterday)
             compute_daily_rollup.run()
-        # info is called at least once (start) — may also log fan_out_complete
         assert mock_log.info.call_count >= 1
         first_call = mock_log.info.call_args_list[0]
         assert first_call.args[0] == "analytics.daily_rollup.start"
 
     def test_log_date_kwarg_is_string(self):
         """The 'date' kwarg in the start log must be a YYYY-MM-DD string."""
-        with patch("corpmind.workers.tasks.analytics.log") as mock_log:
+        from datetime import date, timedelta
+        yesterday = str(date.today() - timedelta(days=1))
+        with (
+            patch("corpmind.workers.tasks.analytics.log") as mock_log,
+            patch("corpmind.workers.tasks.analytics.asyncio") as mock_aio,
+        ):
+            mock_aio.run.return_value = _make_fan_out_return(yesterday)
             compute_daily_rollup.run()
         first_call = mock_log.info.call_args_list[0]
         date_val = first_call.kwargs["date"]
@@ -46,7 +69,9 @@ class TestComputeDailyRollup:
         """Rollup date in the returned dict is yesterday's date string."""
         from datetime import date, timedelta
         yesterday = str(date.today() - timedelta(days=1))
-        result = compute_daily_rollup.run()
+        with patch("corpmind.workers.tasks.analytics.asyncio") as mock_aio:
+            mock_aio.run.return_value = _make_fan_out_return(yesterday)
+            result = compute_daily_rollup.run()
         assert result["rollup_date"] == yesterday
 
 

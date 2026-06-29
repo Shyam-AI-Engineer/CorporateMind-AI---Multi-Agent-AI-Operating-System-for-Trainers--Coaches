@@ -24,10 +24,38 @@ app.conf.beat_schedule = {
         "options": {"queue": "analytics"},
     },
 
+    # ── Campaign summary rollup (daily at 01:30 UTC, after daily_rollup) ────────
+    "analytics.campaign_summary": {
+        "task": "corpmind.workers.tasks.analytics.compute_campaign_summary",
+        "schedule": crontab(hour=1, minute=30),
+        "options": {"queue": "analytics"},
+    },
+
+    # ── Trainer summary rollup (daily at 01:45 UTC, after campaign_summary) ─────
+    "analytics.trainer_summary": {
+        "task": "corpmind.workers.tasks.analytics.compute_trainer_summary",
+        "schedule": crontab(hour=1, minute=45),
+        "options": {"queue": "analytics"},
+    },
+
     # ── Campaign optimizer (daily at 02:00 UTC) ────────────────────────────────
     "campaigns.optimizer": {
         "task": "corpmind.workers.tasks.analytics.run_campaign_optimizer",
         "schedule": crontab(hour=2, minute=0),
+        "options": {"queue": "analytics"},
+    },
+
+    # ── Recommendation outcomes detection (daily at 02:15 UTC) ──────────────────
+    "analytics.rec_outcomes": {
+        "task": "corpmind.workers.tasks.analytics.compute_recommendation_outcomes",
+        "schedule": crontab(hour=2, minute=15),
+        "options": {"queue": "analytics"},
+    },
+
+    # ── Recommendation quality scores rollup (daily at 02:30 UTC) ────────────
+    "analytics.rec_quality_scores": {
+        "task": "corpmind.workers.tasks.analytics.compute_recommendation_quality_scores",
+        "schedule": crontab(hour=2, minute=30),
         "options": {"queue": "analytics"},
     },
 

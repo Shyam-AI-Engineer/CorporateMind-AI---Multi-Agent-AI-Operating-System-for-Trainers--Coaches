@@ -56,3 +56,25 @@ class ProposalDeliveryBlocked:
     outbound_message_id: uuid.UUID
     compliance_reason: str | None
     occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+# Sprint 18A — client-response events
+
+@dataclass(frozen=True)
+class ProposalAccepted:
+    """Fired when the client accepts the proposal and confirms the engagement."""
+    proposal_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    actual_value_inr: object  # Decimal at runtime; typed as object to avoid import
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ProposalDeclined:
+    """Fired when the client declines the proposal."""
+    proposal_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    reason: str | None
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))

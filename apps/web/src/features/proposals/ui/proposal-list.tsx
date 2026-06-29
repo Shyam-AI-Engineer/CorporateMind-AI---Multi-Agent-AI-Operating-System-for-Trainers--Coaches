@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useProposals } from "@/features/proposals/api/use-proposals";
 import {
   ApprovalStatusBadge,
+  ClientStatusBadge,
   DeliveryStatusBadge,
   ProposalStatusBadge,
 } from "@/features/proposals/ui/proposal-status-badge";
@@ -104,6 +105,7 @@ export function ProposalList({
                 <th className="px-4 py-3 font-medium">Approval</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Delivery</th>
+                <th className="px-4 py-3 font-medium">Client Response</th>
                 <th className="px-4 py-3 font-medium">Created</th>
                 <th className="px-4 py-3 font-medium">Sent</th>
                 <th className="px-4 py-3" />
@@ -126,6 +128,12 @@ export function ProposalList({
                   </td>
                   <td className="px-4 py-3">
                     <DeliveryStatusBadge status={p.delivery_status} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <ClientStatusBadge status={p.client_status} />
+                    {!p.client_status && (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {new Date(p.created_at).toLocaleDateString()}

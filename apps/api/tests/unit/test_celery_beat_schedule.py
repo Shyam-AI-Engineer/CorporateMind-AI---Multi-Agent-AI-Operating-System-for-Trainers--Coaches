@@ -1,8 +1,8 @@
 """Unit tests for workers/celery_beat_schedule.py.
 
 Covers:
-- Module imports without error (triggers all 6 module-level statements)
-- All 9 schedule entries are registered
+- Module imports without error (triggers all module-level statements)
+- All 11 schedule entries are registered (Sprint 20A added campaign_summary + trainer_summary)
 - Task names match the canonical Celery task registration names
 - Cadences: daily crontabs use the correct UTC hour; intervals use the right timedelta
 - Queue routing: each job lands on the correct worker queue
@@ -36,11 +36,18 @@ class TestBeatScheduleImport:
 # ── Registered entries ─────────────────────────────────────────────────────────
 
 class TestBeatScheduleEntries:
-    def test_nine_entries_registered(self):
-        assert len(_SCHEDULE) == 9
+    def test_thirteen_entries_registered(self):
+        """Sprint 21 added analytics.rec_outcomes + analytics.rec_quality_scores."""
+        assert len(_SCHEDULE) == 13
 
     def test_analytics_daily_rollup_registered(self):
         assert "analytics.daily_rollup" in _SCHEDULE
+
+    def test_analytics_campaign_summary_registered(self):
+        assert "analytics.campaign_summary" in _SCHEDULE
+
+    def test_analytics_trainer_summary_registered(self):
+        assert "analytics.trainer_summary" in _SCHEDULE
 
     def test_campaigns_optimizer_registered(self):
         assert "campaigns.optimizer" in _SCHEDULE
@@ -107,6 +114,16 @@ class TestBeatScheduleTaskNames:
             "corpmind.workers.tasks.social.publish_scheduled_posts"
         )
 
+    def test_campaign_summary_task_name(self):
+        assert _SCHEDULE["analytics.campaign_summary"]["task"] == (
+            "corpmind.workers.tasks.analytics.compute_campaign_summary"
+        )
+
+    def test_trainer_summary_task_name(self):
+        assert _SCHEDULE["analytics.trainer_summary"]["task"] == (
+            "corpmind.workers.tasks.analytics.compute_trainer_summary"
+        )
+
 
 # ── Cadence ────────────────────────────────────────────────────────────────────
 
@@ -141,6 +158,12 @@ class TestBeatScheduleCadence:
 
     def test_social_publisher_runs_every_15_minutes(self):
         assert _SCHEDULE["social.publish_scheduled_posts"]["schedule"] == timedelta(minutes=15)
+
+    def test_campaign_summary_runs_at_0130_utc(self):
+        assert _SCHEDULE["analytics.campaign_summary"]["schedule"] == crontab(hour=1, minute=30)
+
+    def test_trainer_summary_runs_at_0145_utc(self):
+        assert _SCHEDULE["analytics.trainer_summary"]["schedule"] == crontab(hour=1, minute=45)
 
 
 # ── Queue routing ──────────────────────────────────────────────────────────────

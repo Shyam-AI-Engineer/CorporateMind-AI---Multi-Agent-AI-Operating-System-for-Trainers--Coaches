@@ -151,6 +151,15 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.inbox.api import router as inbox_router
     from corpmind.modules.crm.booking_webhook import router as booking_webhook_router
     from corpmind.modules.whatsapp.api import router as whatsapp_router
+    from corpmind.modules.dashboard.api import router as dashboard_router
+    from corpmind.modules.operations.api import router as operations_router
+    from corpmind.modules.team.api import router as team_router
+    from corpmind.modules.approvals.api import router as approvals_router
+    from corpmind.modules.notifications.api import router as notifications_router
+    from corpmind.modules.workflows.api import router as workflows_router
+    from corpmind.modules.workflows.api import steps_router as workflow_steps_router
+    from corpmind.modules.workflows.api import run_router as workflow_runs_router
+    from corpmind.modules.workflows.api import run_steps_router as workflow_run_steps_router
 
     app.include_router(identity_router, prefix="/api/v1/identity", tags=["identity"])
     app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["inbox"])
@@ -165,6 +174,15 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(social_router, prefix="/api/v1/social", tags=["social"])
     app.include_router(booking_webhook_router, prefix="/api/v1/webhooks", tags=["webhooks"])
     app.include_router(whatsapp_router, prefix="/api/v1/whatsapp", tags=["whatsapp"])
+    app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
+    app.include_router(operations_router, prefix="/api/v1/operations", tags=["operations"])
+    app.include_router(team_router, prefix="/api/v1/team", tags=["team"])
+    app.include_router(approvals_router, prefix="/api/v1/approvals", tags=["approvals"])
+    app.include_router(notifications_router, prefix="/api/v1/notifications", tags=["notifications"])
+    app.include_router(workflows_router, prefix="/api/v1/workflow-templates", tags=["workflows"])
+    app.include_router(workflow_steps_router, prefix="/api/v1/workflow-steps", tags=["workflows"])
+    app.include_router(workflow_runs_router, prefix="/api/v1/workflow-runs", tags=["workflow-runs"])
+    app.include_router(workflow_run_steps_router, prefix="/api/v1/workflow-run-steps", tags=["workflow-runs"])
 
     # Health check (no auth required)
     from fastapi import APIRouter

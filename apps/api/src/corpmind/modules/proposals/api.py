@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from corpmind.core.database import get_session
 from corpmind.modules.crm.service import CRMService
 from corpmind.modules.proposals.schemas import (
+    AcceptProposalRequest,
+    DeclineProposalRequest,
     GenerateProposalRequest,
     ProposalListOut,
     ProposalOut,
@@ -115,3 +117,29 @@ async def send_proposal(
     session: AsyncSession = Depends(get_session),
 ) -> ProposalOut:
     return await ProposalService(session).deliver(proposal_id)
+
+
+@router.post(
+    "/{proposal_id}/accept",
+    response_model=ProposalOut,
+    summary="Record client acceptance and confirmed deal value (Sprint 18A)",
+)
+async def accept_proposal(
+    proposal_id: uuid.UUID,
+    req: AcceptProposalRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ProposalOut:
+    return await ProposalService(session).record_acceptance(proposal_id, req)
+
+
+@router.post(
+    "/{proposal_id}/decline",
+    response_model=ProposalOut,
+    summary="Record client declination of a sent proposal (Sprint 18A)",
+)
+async def decline_proposal(
+    proposal_id: uuid.UUID,
+    req: DeclineProposalRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ProposalOut:
+    return await ProposalService(session).record_declination(proposal_id, req)

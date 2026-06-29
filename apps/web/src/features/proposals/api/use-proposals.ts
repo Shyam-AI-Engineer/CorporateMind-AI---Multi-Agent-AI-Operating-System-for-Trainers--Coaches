@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
+  AcceptProposalRequest,
+  DeclineProposalRequest,
   GenerateProposalRequest,
   Proposal,
   ProposalListOut,
@@ -86,6 +88,27 @@ export function useDeliverProposal(workspaceId: string | null | undefined) {
     mutationFn: (proposalId: string) =>
       api.post<Proposal>(`/api/v1/proposals/${proposalId}/send`, {}),
     onSuccess: (_, proposalId) => invalidate(proposalId),
+  });
+}
+
+export function useAcceptProposal(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateProposals(workspaceId);
+  return useMutation({
+    mutationFn: ({ proposalId, actual_value_inr, expected_value_inr }: AcceptProposalRequest) =>
+      api.post<Proposal>(`/api/v1/proposals/${proposalId}/accept`, {
+        actual_value_inr,
+        ...(expected_value_inr !== undefined && { expected_value_inr }),
+      }),
+    onSuccess: (_, { proposalId }) => invalidate(proposalId),
+  });
+}
+
+export function useDeclineProposal(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateProposals(workspaceId);
+  return useMutation({
+    mutationFn: ({ proposalId, reason }: DeclineProposalRequest) =>
+      api.post<Proposal>(`/api/v1/proposals/${proposalId}/decline`, { reason }),
+    onSuccess: (_, { proposalId }) => invalidate(proposalId),
   });
 }
 

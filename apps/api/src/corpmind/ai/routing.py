@@ -31,6 +31,10 @@ _ROUTING_MATRIX: dict[str, list[str]] = {
     "followup_question":    ["claude-sonnet-4-6", "gpt-4.1", "claude-haiku-4-5"],
     "followup_nudge":       ["claude-sonnet-4-6", "gpt-4.1", "claude-haiku-4-5"],
 
+    # ── Analytics narrative summarisation (cheap) ────────────────────────────
+    # Summarisation over deterministic data — no reasoning required (ADR-0011).
+    "analytics_narrative":  ["claude-haiku-4-5", "gpt-4.1-nano", "gemini-2.5-flash"],
+
     # ── Planning (premium) ────────────────────────────────────────────────────
     "root_planning":        ["claude-opus-4-7", "claude-sonnet-4-6"],
 }

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import {
   ApprovalStatusBadge,
+  ClientStatusBadge,
   DeliveryStatusBadge,
   ProposalStatusBadge,
 } from "./proposal-status-badge";
@@ -74,5 +75,32 @@ describe("DeliveryStatusBadge", () => {
   it("renders 'Failed' for failed", () => {
     render(<DeliveryStatusBadge status="failed" />);
     expect(screen.getByText("Failed")).not.toBeNull();
+  });
+});
+
+describe("ClientStatusBadge", () => {
+  it("renders nothing when status is null", () => {
+    const { container } = render(<ClientStatusBadge status={null} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("renders nothing when status is undefined", () => {
+    const { container } = render(<ClientStatusBadge status={undefined} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("renders 'Accepted' for accepted", () => {
+    render(<ClientStatusBadge status="accepted" />);
+    expect(screen.getByText("Accepted")).not.toBeNull();
+  });
+
+  it("renders 'Declined' for declined", () => {
+    render(<ClientStatusBadge status="declined" />);
+    expect(screen.getByText("Declined")).not.toBeNull();
+  });
+
+  it("falls back to the raw string for unknown status", () => {
+    render(<ClientStatusBadge status="pending_response" />);
+    expect(screen.getByText("pending_response")).not.toBeNull();
   });
 });

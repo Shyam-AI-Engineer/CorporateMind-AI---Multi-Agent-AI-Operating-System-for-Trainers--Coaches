@@ -94,6 +94,12 @@ function makeProposal(overrides: Partial<Proposal> = {}): Proposal {
     rejected_reason: null,
     outbound_message_id: null,
     delivery_status: null,
+    lead_id: null,
+    expected_value_inr: null,
+    actual_value_inr: null,
+    client_status: null,
+    client_accepted_at: null,
+    client_declined_at: null,
     ...overrides,
   };
 }

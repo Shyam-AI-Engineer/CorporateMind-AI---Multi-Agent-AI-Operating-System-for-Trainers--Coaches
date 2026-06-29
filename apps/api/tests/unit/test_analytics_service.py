@@ -56,6 +56,8 @@ def _row(
     proposals_approved: int = 0,
     proposals_sent: int = 0,
     ai_spend_inr: float = 0.0,
+    proposals_accepted: int = 0,
+    closed_revenue_inr: float = 0.0,
 ) -> AnalyticsDaily:
     r = MagicMock(spec=AnalyticsDaily)
     r.rollup_date = rollup_date or date.today()
@@ -73,6 +75,8 @@ def _row(
     r.proposals_approved = proposals_approved
     r.proposals_sent = proposals_sent
     r.ai_spend_inr = ai_spend_inr
+    r.proposals_accepted = proposals_accepted
+    r.closed_revenue_inr = closed_revenue_inr
     return r
 
 
@@ -238,6 +242,10 @@ async def test_funnel_all_zeros_on_empty_workspace():
         _scalar_result(0),  # meetings
         _scalar_result(0),  # proposals
         _scalar_result(0),  # bookings
+        _scalar_result(0),  # proposals_accepted (Sprint 18A)
+        _scalar_result(0),  # pipeline_value_inr (Sprint 18A)
+        _scalar_result(0),  # closed_revenue_inr (Sprint 18A)
+        _scalar_result(0),  # proposals_sent_count for win_rate (Sprint 18A)
     ])
 
     svc = AnalyticsService(session)
@@ -250,6 +258,10 @@ async def test_funnel_all_zeros_on_empty_workspace():
     assert result.meetings == 0
     assert result.proposals == 0
     assert result.bookings == 0
+    assert result.proposals_accepted == 0
+    assert result.pipeline_value_inr == 0.0
+    assert result.closed_revenue_inr == 0.0
+    assert result.win_rate == 0.0
 
 
 @pytest.mark.asyncio
@@ -262,12 +274,16 @@ async def test_funnel_maps_sql_results_correctly():
         return r
 
     session.execute = AsyncMock(side_effect=[
-        _scalar_result(150),   # contacts
-        _scalar_result(80),    # outreach_sent
-        _scalar_result(20),    # replies (interested only)
-        _scalar_result(8),     # meetings
-        _scalar_result(5),     # proposals
-        _scalar_result(3),     # bookings
+        _scalar_result(150),     # contacts
+        _scalar_result(80),      # outreach_sent
+        _scalar_result(20),      # replies (interested only)
+        _scalar_result(8),       # meetings
+        _scalar_result(5),       # proposals
+        _scalar_result(3),       # bookings
+        _scalar_result(2),       # proposals_accepted (Sprint 18A)
+        _scalar_result(250000),  # pipeline_value_inr (Sprint 18A)
+        _scalar_result(180000),  # closed_revenue_inr (Sprint 18A)
+        _scalar_result(4),       # proposals_sent_count for win_rate (Sprint 18A)
     ])
 
     svc = AnalyticsService(session)
@@ -280,3 +296,210 @@ async def test_funnel_maps_sql_results_correctly():
     assert result.meetings == 8
     assert result.proposals == 5
     assert result.bookings == 3
+    assert result.proposals_accepted == 2
+    assert result.pipeline_value_inr == 250000.0
+    assert result.closed_revenue_inr == 180000.0
+    assert result.win_rate == round(2 / 4, 4)
+
+
+# ── Sprint 19: get_campaign_roi ───────────────────────────────────────────────
+
+from decimal import Decimal
+from datetime import datetime, UTC
+from corpmind.modules.analytics.models import AnalyticsCampaignSummary
+
+
+def _campaign_row(
+    *,
+    proposals_sent: int = 10,
+    proposals_accepted: int = 3,
+    closed_revenue_inr: float = 150000.0,
+    avg_deal_size_inr: float | None = 50000.0,
+    win_rate: float = 0.3,
+    avg_days_to_accept: float | None = 7.5,
+) -> MagicMock:
+    r = MagicMock(spec=AnalyticsCampaignSummary)
+    r.campaign_id = uuid.uuid4()
+    r.campaign_name = "Test Campaign"
+    r.channel = "whatsapp"
+    r.campaign_status = "completed"
+    r.recipients_count = 100
+    r.messages_sent = 100
+    r.messages_delivered = 90
+    r.replies_received = 20
+    r.leads_created = 5
+    r.proposals_sent = proposals_sent
+    r.proposals_accepted = proposals_accepted
+    r.closed_revenue_inr = Decimal(str(closed_revenue_inr))
+    r.avg_deal_size_inr = Decimal(str(avg_deal_size_inr)) if avg_deal_size_inr is not None else None
+    r.win_rate = Decimal(str(win_rate))
+    r.avg_days_to_accept = Decimal(str(avg_days_to_accept)) if avg_days_to_accept is not None else None
+    r.last_refreshed_at = datetime.now(UTC)
+    return r
+
+
+@pytest.mark.asyncio
+async def test_campaign_roi_confidence_metadata():
+    """Rows with < 5 proposals_sent are flagged low_confidence (Amendment 2)."""
+    row_high = _campaign_row(proposals_sent=10)
+    row_low = _campaign_row(proposals_sent=3)
+
+    session = MagicMock()
+    svc = AnalyticsService(session)
+
+    mock_repo = MagicMock()
+    mock_repo.list_by_workspace = AsyncMock(return_value=[row_high, row_low])
+    mock_repo.count_by_workspace = AsyncMock(return_value=2)
+
+    with (
+        patch("corpmind.modules.analytics.service.get_tenant_context", return_value=_ctx()),
+        patch("corpmind.modules.analytics.service.AnalyticsCampaignSummaryRepo", return_value=mock_repo),
+    ):
+        result = await svc.get_campaign_roi(workspace_id=WORKSPACE_ID)
+
+    assert result.total == 2
+    assert result.attribution_model == "all_touch"
+
+    items = result.items
+    assert items[0].low_confidence is False
+    assert items[0].sample_size == 10
+    assert items[1].low_confidence is True
+    assert items[1].sample_size == 3
+
+
+@pytest.mark.asyncio
+async def test_campaign_roi_attribution_model_always_all_touch():
+    """attribution_model must always be 'all_touch' (Amendment 3)."""
+    session = MagicMock()
+    svc = AnalyticsService(session)
+
+    mock_repo = MagicMock()
+    mock_repo.list_by_workspace = AsyncMock(return_value=[])
+    mock_repo.count_by_workspace = AsyncMock(return_value=0)
+
+    with (
+        patch("corpmind.modules.analytics.service.get_tenant_context", return_value=_ctx()),
+        patch("corpmind.modules.analytics.service.AnalyticsCampaignSummaryRepo", return_value=mock_repo),
+    ):
+        result = await svc.get_campaign_roi(workspace_id=WORKSPACE_ID)
+
+    assert result.attribution_model == "all_touch"
+    assert result.items == []
+    assert result.total == 0
+
+
+@pytest.mark.asyncio
+async def test_campaign_roi_avg_days_to_accept_none_when_no_accepted():
+    """avg_days_to_accept should pass through as None when stored as None."""
+    row = _campaign_row(proposals_sent=6, avg_days_to_accept=None)
+    session = MagicMock()
+    svc = AnalyticsService(session)
+
+    mock_repo = MagicMock()
+    mock_repo.list_by_workspace = AsyncMock(return_value=[row])
+    mock_repo.count_by_workspace = AsyncMock(return_value=1)
+
+    with (
+        patch("corpmind.modules.analytics.service.get_tenant_context", return_value=_ctx()),
+        patch("corpmind.modules.analytics.service.AnalyticsCampaignSummaryRepo", return_value=mock_repo),
+    ):
+        result = await svc.get_campaign_roi(workspace_id=WORKSPACE_ID)
+
+    assert result.items[0].avg_days_to_accept is None
+
+
+# ── Sprint 19: get_pricing_calibration ────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_pricing_calibration_low_confidence_when_lt_5_samples():
+    """low_confidence=True when fewer than 5 accepted proposals (Amendment 2)."""
+    session = MagicMock()
+
+    def _mapping(data: dict) -> MagicMock:
+        m = MagicMock()
+        m.__getitem__ = lambda self, k: data[k]
+        return m
+
+    profile_result = MagicMock()
+    profile_result.mappings = MagicMock(return_value=MagicMock(
+        first=MagicMock(return_value=_mapping({"pricing_min_inr": 50000, "pricing_max_inr": 200000}))
+    ))
+
+    stats_result = MagicMock()
+    stats_result.mappings = MagicMock(return_value=MagicMock(
+        first=MagicMock(return_value=_mapping({
+            "sample_size": 3,
+            "actual_min": 60000,
+            "actual_max": 120000,
+            "actual_avg": 90000,
+            "actual_median": 85000,
+            "avg_days": 8.5,
+        }))
+    ))
+
+    session.execute = AsyncMock(side_effect=[profile_result, stats_result])
+
+    svc = AnalyticsService(session)
+    ctx = MagicMock()
+    ctx.org_id = TENANT_ID
+
+    with (
+        patch("corpmind.modules.analytics.service.get_tenant_context", return_value=ctx),
+        patch("corpmind.modules.analytics.service.get_redis") as mock_redis,
+    ):
+        mock_redis.return_value.get = AsyncMock(return_value=None)
+        mock_redis.return_value.set = AsyncMock()
+        result = await svc.get_pricing_calibration(workspace_id=WORKSPACE_ID)
+
+    assert result.low_confidence is True
+    assert result.sample_size == 3
+    assert result.stated_min_inr == 50000
+    assert result.stated_max_inr == 200000
+    assert result.avg_days_to_accept == pytest.approx(8.5)
+
+
+@pytest.mark.asyncio
+async def test_pricing_calibration_not_low_confidence_when_gte_5():
+    """low_confidence=False when 5+ accepted proposals."""
+    session = MagicMock()
+
+    def _mapping(data: dict) -> MagicMock:
+        m = MagicMock()
+        m.__getitem__ = lambda self, k: data[k]
+        return m
+
+    profile_result = MagicMock()
+    profile_result.mappings = MagicMock(return_value=MagicMock(
+        first=MagicMock(return_value=None)
+    ))
+
+    stats_result = MagicMock()
+    stats_result.mappings = MagicMock(return_value=MagicMock(
+        first=MagicMock(return_value=_mapping({
+            "sample_size": 8,
+            "actual_min": 40000,
+            "actual_max": 300000,
+            "actual_avg": 150000,
+            "actual_median": 140000,
+            "avg_days": 12.0,
+        }))
+    ))
+
+    session.execute = AsyncMock(side_effect=[profile_result, stats_result])
+
+    svc = AnalyticsService(session)
+    ctx = MagicMock()
+    ctx.org_id = TENANT_ID
+
+    with (
+        patch("corpmind.modules.analytics.service.get_tenant_context", return_value=ctx),
+        patch("corpmind.modules.analytics.service.get_redis") as mock_redis,
+    ):
+        mock_redis.return_value.get = AsyncMock(return_value=None)
+        mock_redis.return_value.set = AsyncMock()
+        result = await svc.get_pricing_calibration(workspace_id=WORKSPACE_ID)
+
+    assert result.low_confidence is False
+    assert result.sample_size == 8
+    assert result.stated_min_inr is None
+    assert result.stated_max_inr is None

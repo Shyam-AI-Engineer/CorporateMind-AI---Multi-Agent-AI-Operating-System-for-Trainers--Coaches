@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { AlertCircle, Send } from "lucide-react";
+import { AlertCircle, CheckCircle2, Send, XCircle } from "lucide-react";
 import {
   useApproveProposal,
   useDeliverProposal,
@@ -11,15 +11,22 @@ import {
 } from "@/features/proposals/api/use-proposals";
 import {
   ApprovalStatusBadge,
+  ClientStatusBadge,
   DeliveryStatusBadge,
   ProposalStatusBadge,
 } from "@/features/proposals/ui/proposal-status-badge";
 import { ProposalContentView } from "@/features/proposals/ui/proposal-content-view";
 import { ProposalRejectDialog } from "@/features/proposals/ui/proposal-reject-dialog";
+import { AcceptProposalDialog } from "@/features/proposals/ui/accept-proposal-dialog";
+import { DeclineProposalDialog } from "@/features/proposals/ui/decline-proposal-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/hooks/use-workspace";
 import { ApiError } from "@/lib/api";
+
+function formatInr(value: number): string {
+  return `₹${value.toLocaleString("en-IN")}`;
+}
 
 export default function ProposalDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -29,6 +36,8 @@ export default function ProposalDetailPage() {
   const deliver = useDeliverProposal(workspaceId);
 
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [acceptOpen, setAcceptOpen] = useState(false);
+  const [declineOpen, setDeclineOpen] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
   const [deliverError, setDeliverError] = useState<string | null>(null);
 
@@ -61,6 +70,10 @@ export default function ProposalDetailPage() {
     proposal.approval_status === "approved" && proposal.status === "draft";
   const isRejected = proposal.approval_status === "rejected";
   const isDeliveryBlocked = proposal.delivery_status === "blocked";
+  const isSentAwaitingResponse =
+    proposal.status === "sent" && proposal.client_status === null;
+  const isAccepted = proposal.client_status === "accepted";
+  const isDeclined = proposal.client_status === "declined";
 
   async function handleApprove() {
     setApproveError(null);
@@ -108,6 +121,7 @@ export default function ProposalDetailPage() {
         <div className="flex items-center gap-2">
           <ProposalStatusBadge status={proposal.status} />
           <ApprovalStatusBadge status={proposal.approval_status} />
+          <ClientStatusBadge status={proposal.client_status} />
         </div>
       </div>
 
@@ -118,6 +132,12 @@ export default function ProposalDetailPage() {
         </MetaCell>
         <MetaCell label="Delivery">
           <DeliveryStatusBadge status={proposal.delivery_status} />
+        </MetaCell>
+        <MetaCell label="Client response">
+          <ClientStatusBadge status={proposal.client_status} />
+          {!proposal.client_status && (
+            <span className="text-muted-foreground">—</span>
+          )}
         </MetaCell>
         <MetaCell label="Created">
           {new Date(proposal.created_at).toLocaleString()}
@@ -140,6 +160,28 @@ export default function ProposalDetailPage() {
             <span className="text-destructive">{proposal.rejected_reason}</span>
           </MetaCell>
         )}
+        {proposal.expected_value_inr !== null && proposal.expected_value_inr !== undefined && (
+          <MetaCell label="Expected value">
+            {formatInr(proposal.expected_value_inr)}
+          </MetaCell>
+        )}
+        {proposal.actual_value_inr !== null && proposal.actual_value_inr !== undefined && (
+          <MetaCell label="Deal value">
+            <span className="text-green-700 dark:text-green-400">
+              {formatInr(proposal.actual_value_inr)}
+            </span>
+          </MetaCell>
+        )}
+        {proposal.client_accepted_at && (
+          <MetaCell label="Accepted at">
+            {new Date(proposal.client_accepted_at).toLocaleString()}
+          </MetaCell>
+        )}
+        {proposal.client_declined_at && (
+          <MetaCell label="Declined at">
+            {new Date(proposal.client_declined_at).toLocaleString()}
+          </MetaCell>
+        )}
       </dl>
 
       {/* Compliance block callout */}
@@ -156,7 +198,33 @@ export default function ProposalDetailPage() {
         </div>
       )}
 
-      {/* Action bar */}
+      {/* Accepted callout */}
+      {isAccepted && (
+        <div className="flex items-start gap-2 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Client accepted this proposal</p>
+            {proposal.actual_value_inr !== null && proposal.actual_value_inr !== undefined && (
+              <p className="mt-0.5 text-xs">
+                Deal value: {formatInr(proposal.actual_value_inr)}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Declined callout */}
+      {isDeclined && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Client declined this proposal</p>
+            <p className="mt-0.5 text-xs">No further actions are available.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Action bar — internal approval */}
       {isPendingApproval && (
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -180,6 +248,7 @@ export default function ProposalDetailPage() {
         </div>
       )}
 
+      {/* Action bar — send */}
       {isApprovedDraft && (
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -196,18 +265,51 @@ export default function ProposalDetailPage() {
         </div>
       )}
 
+      {/* Action bar — client response (sent, awaiting) */}
+      {isSentAwaitingResponse && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            onClick={() => setAcceptOpen(true)}
+          >
+            <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+            Record Acceptance
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setDeclineOpen(true)}
+          >
+            <XCircle className="mr-1.5 h-3.5 w-3.5" />
+            Record Decline
+          </Button>
+        </div>
+      )}
+
       {/* Proposal content */}
       <div className="space-y-2">
         <h2 className="text-sm font-semibold">Proposal content</h2>
         <ProposalContentView proposal={proposal} />
       </div>
 
-      {/* Reject dialog — mounted at top level so it survives re-renders */}
+      {/* Dialogs */}
       <ProposalRejectDialog
         proposalId={proposal.id}
         workspaceId={workspaceId}
         open={rejectOpen}
         onOpenChange={setRejectOpen}
+      />
+      <AcceptProposalDialog
+        proposalId={proposal.id}
+        workspaceId={workspaceId}
+        open={acceptOpen}
+        onOpenChange={setAcceptOpen}
+      />
+      <DeclineProposalDialog
+        proposalId={proposal.id}
+        workspaceId={workspaceId}
+        open={declineOpen}
+        onOpenChange={setDeclineOpen}
       />
     </div>
   );

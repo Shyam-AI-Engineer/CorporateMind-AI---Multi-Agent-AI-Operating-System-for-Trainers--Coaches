@@ -6,11 +6,15 @@ import type { Proposal } from "@/features/proposals/types";
 
 const mockApprove = vi.fn();
 const mockDeliver = vi.fn();
+const mockAccept = vi.fn();
+const mockDecline = vi.fn();
 
 vi.mock("@/features/proposals/api/use-proposals", () => ({
   useProposal: vi.fn(),
   useApproveProposal: () => ({ mutateAsync: mockApprove, isPending: false }),
   useDeliverProposal: () => ({ mutateAsync: mockDeliver, isPending: false }),
+  useAcceptProposal: () => ({ mutateAsync: mockAccept, isPending: false }),
+  useDeclineProposal: () => ({ mutateAsync: mockDecline, isPending: false }),
 }));
 
 vi.mock("@/hooks/use-workspace", () => ({
@@ -22,10 +26,18 @@ vi.mock("@/features/proposals/ui/proposal-content-view", () => ({
   ProposalContentView: () => <div data-testid="content-view" />,
 }));
 
-// ProposalRejectDialog is tested separately; stub it here.
+// Dialogs are tested separately; stub them here.
 vi.mock("@/features/proposals/ui/proposal-reject-dialog", () => ({
   ProposalRejectDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="reject-dialog" /> : null,
+}));
+vi.mock("@/features/proposals/ui/accept-proposal-dialog", () => ({
+  AcceptProposalDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="accept-dialog" /> : null,
+}));
+vi.mock("@/features/proposals/ui/decline-proposal-dialog", () => ({
+  DeclineProposalDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="decline-dialog" /> : null,
 }));
 
 // Stub Link so we don't need the full Next.js router.
@@ -61,6 +73,13 @@ function makeProposal(overrides: Partial<Proposal> = {}): Proposal {
     rejected_reason: null,
     outbound_message_id: null,
     delivery_status: null,
+    // Sprint 18A fields — default to null
+    lead_id: null,
+    expected_value_inr: null,
+    actual_value_inr: null,
+    client_status: null,
+    client_accepted_at: null,
+    client_declined_at: null,
     ...overrides,
   };
 }
@@ -253,6 +272,119 @@ describe("ProposalDetailPage", () => {
       expect(
         screen.getByText("Delivery blocked by compliance"),
       ).not.toBeNull();
+    });
+  });
+
+  describe("sent + awaiting client response state", () => {
+    function makeSentProposal(clientOverrides: Partial<Proposal> = {}) {
+      return makeProposal({
+        approval_status: "approved",
+        status: "sent",
+        sent_at: "2026-01-03T10:00:00Z",
+        delivery_status: "sent",
+        client_status: null,
+        ...clientOverrides,
+      });
+    }
+
+    it("shows Record Acceptance and Record Decline buttons when sent with no client response", () => {
+      mockLoaded(makeSentProposal());
+      render(<ProposalDetailPage />);
+      expect(screen.getByRole("button", { name: /record acceptance/i })).not.toBeNull();
+      expect(screen.getByRole("button", { name: /record decline/i })).not.toBeNull();
+    });
+
+    it("does not show internal approval buttons when sent", () => {
+      mockLoaded(makeSentProposal());
+      render(<ProposalDetailPage />);
+      expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
+    });
+
+    it("opens accept dialog when Record Acceptance is clicked", () => {
+      mockLoaded(makeSentProposal());
+      render(<ProposalDetailPage />);
+      fireEvent.click(screen.getByRole("button", { name: /record acceptance/i }));
+      expect(screen.getByTestId("accept-dialog")).not.toBeNull();
+    });
+
+    it("opens decline dialog when Record Decline is clicked", () => {
+      mockLoaded(makeSentProposal());
+      render(<ProposalDetailPage />);
+      fireEvent.click(screen.getByRole("button", { name: /record decline/i }));
+      expect(screen.getByTestId("decline-dialog")).not.toBeNull();
+    });
+  });
+
+  describe("accepted state", () => {
+    it("shows accepted callout", () => {
+      mockLoaded(
+        makeProposal({
+          approval_status: "approved",
+          status: "sent",
+          client_status: "accepted",
+          actual_value_inr: 150000,
+          client_accepted_at: "2026-01-04T10:00:00Z",
+        }),
+      );
+      render(<ProposalDetailPage />);
+      expect(screen.getByText(/client accepted this proposal/i)).not.toBeNull();
+    });
+
+    it("shows formatted deal value in accepted callout", () => {
+      mockLoaded(
+        makeProposal({
+          approval_status: "approved",
+          status: "sent",
+          client_status: "accepted",
+          actual_value_inr: 150000,
+        }),
+      );
+      render(<ProposalDetailPage />);
+      // value appears in both the metadata grid and the accepted callout
+      const matches = screen.getAllByText(/1,50,000|150,000/);
+      expect(matches.length).toBeGreaterThan(0);
+    });
+
+    it("does not show client response action buttons when accepted", () => {
+      mockLoaded(
+        makeProposal({
+          approval_status: "approved",
+          status: "sent",
+          client_status: "accepted",
+        }),
+      );
+      render(<ProposalDetailPage />);
+      expect(screen.queryByRole("button", { name: /record acceptance/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /record decline/i })).toBeNull();
+    });
+  });
+
+  describe("declined state", () => {
+    it("shows declined callout", () => {
+      mockLoaded(
+        makeProposal({
+          approval_status: "approved",
+          status: "sent",
+          client_status: "declined",
+          client_declined_at: "2026-01-05T10:00:00Z",
+        }),
+      );
+      render(<ProposalDetailPage />);
+      expect(screen.getByText(/client declined this proposal/i)).not.toBeNull();
+    });
+
+    it("does not show client response action buttons when declined", () => {
+      mockLoaded(
+        makeProposal({
+          approval_status: "approved",
+          status: "sent",
+          client_status: "declined",
+        }),
+      );
+      render(<ProposalDetailPage />);
+      expect(screen.queryByRole("button", { name: /record acceptance/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /record decline/i })).toBeNull();
     });
   });
 
