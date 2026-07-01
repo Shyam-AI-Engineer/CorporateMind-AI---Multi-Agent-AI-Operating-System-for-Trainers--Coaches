@@ -160,6 +160,10 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.workflows.api import steps_router as workflow_steps_router
     from corpmind.modules.workflows.api import run_router as workflow_runs_router
     from corpmind.modules.workflows.api import run_steps_router as workflow_run_steps_router
+    from corpmind.modules.workflows.api import analytics_router as workflow_analytics_router
+    from corpmind.modules.workflows.api import sla_router as workflow_sla_router
+    from corpmind.modules.workflows.api import effectiveness_router as workflow_effectiveness_router
+    from corpmind.modules.workflows.api import observability_router as workflow_observability_router
 
     app.include_router(identity_router, prefix="/api/v1/identity", tags=["identity"])
     app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["inbox"])
@@ -183,6 +187,10 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(workflow_steps_router, prefix="/api/v1/workflow-steps", tags=["workflows"])
     app.include_router(workflow_runs_router, prefix="/api/v1/workflow-runs", tags=["workflow-runs"])
     app.include_router(workflow_run_steps_router, prefix="/api/v1/workflow-run-steps", tags=["workflow-runs"])
+    app.include_router(workflow_analytics_router, prefix="/api/v1/workflow-analytics", tags=["workflow-analytics"])
+    app.include_router(workflow_sla_router, prefix="/api/v1/workflow-sla", tags=["workflow-sla"])
+    app.include_router(workflow_effectiveness_router, prefix="/api/v1/workflow-effectiveness", tags=["workflow-effectiveness"])
+    app.include_router(workflow_observability_router, prefix="/api/v1/workflow-observability", tags=["workflow-observability"])
 
     # Health check (no auth required)
     from fastapi import APIRouter

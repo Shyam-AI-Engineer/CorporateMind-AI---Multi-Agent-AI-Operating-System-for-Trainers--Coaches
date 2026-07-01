@@ -119,6 +119,14 @@ class WorkflowRun(TenantBase):
         DateTime(timezone=True), nullable=True
     )
 
+    # ── Entity context (Sprint 35) — nullable; attachment is optional ────────
+    # entity_type: lead | proposal | campaign | customer | training | other
+    entity_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), nullable=True
+    )
+    entity_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     run_steps: Mapped[list[WorkflowRunStep]] = relationship(
         "WorkflowRunStep",
         back_populates="run",
@@ -166,6 +174,9 @@ class WorkflowRunStep(TenantBase):
     )
     completed_by: Mapped[uuid.UUID | None] = mapped_column(
         PgUUID(as_uuid=True), nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -25,6 +25,9 @@ _VALID_NOTIFICATION_TYPES: frozenset[str] = frozenset({
     "workflow_cancelled",
     "workflow_completed",
     "workflow_step_completed",
+    # Sprint 35: entity integration notifications
+    "workflow_entity_attached",
+    "workflow_entity_detached",
 })
 
 _VALID_PRIORITIES: frozenset[str] = frozenset({"low", "medium", "high", "urgent"})

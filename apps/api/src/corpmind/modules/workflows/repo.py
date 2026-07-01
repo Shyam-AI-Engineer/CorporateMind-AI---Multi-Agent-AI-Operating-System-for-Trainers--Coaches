@@ -111,6 +111,18 @@ class WorkflowTemplateRepo:
 
         return items, next_cursor
 
+    async def find_all_for_workspace(self, workspace_id: uuid.UUID) -> list[WorkflowTemplate]:
+        """Load all templates for a workspace (used by analytics service)."""
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(WorkflowTemplate)
+            .where(
+                WorkflowTemplate.tenant_id == ctx.org_id,
+                WorkflowTemplate.workspace_id == workspace_id,
+            )
+        )
+        return list(result.scalars().all())
+
 
 class WorkflowStepRepo:
     def __init__(self, session: AsyncSession) -> None:
@@ -282,6 +294,159 @@ class WorkflowRunRepo:
             next_cursor = base64.b64encode(raw.encode()).decode()
 
         return items, next_cursor
+
+
+    async def find_by_entity(
+        self,
+        workspace_id: uuid.UUID,
+        entity_type: str,
+        entity_id: uuid.UUID,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> tuple[list[WorkflowRun], str | None]:
+        """Cursor-paginated list of runs attached to an entity, newest-first."""
+        ctx = get_tenant_context()
+        stmt = (
+            select(WorkflowRun)
+            .where(
+                WorkflowRun.tenant_id == ctx.org_id,
+                WorkflowRun.workspace_id == workspace_id,
+                WorkflowRun.entity_type == entity_type,
+                WorkflowRun.entity_id == entity_id,
+            )
+            .order_by(WorkflowRun.started_at.desc(), WorkflowRun.id.desc())
+        )
+
+        if cursor:
+            try:
+                raw = base64.b64decode(cursor.encode()).decode()
+                ts_str, id_str = raw.split("|", 1)
+                cursor_ts = datetime.fromisoformat(ts_str)
+                cursor_id = uuid.UUID(id_str)
+                stmt = stmt.where(
+                    (WorkflowRun.started_at < cursor_ts)
+                    | (
+                        (WorkflowRun.started_at == cursor_ts)
+                        & (WorkflowRun.id < cursor_id)
+                    )
+                )
+            except Exception:
+                pass
+
+        result = await self._session.execute(stmt.limit(limit + 1))
+        rows = list(result.scalars().all())
+
+        has_more = len(rows) > limit
+        items = rows[:limit]
+        next_cursor: str | None = None
+        if has_more and items:
+            last = items[-1]
+            raw = f"{last.started_at.isoformat()}|{last.id}"
+            next_cursor = base64.b64encode(raw.encode()).decode()
+
+        return items, next_cursor
+
+    async def find_active_entity_run(
+        self,
+        workspace_id: uuid.UUID,
+        entity_type: str,
+        entity_id: uuid.UUID,
+    ) -> WorkflowRun | None:
+        """Return the single active/pending run for an entity, or None."""
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(WorkflowRun).where(
+                WorkflowRun.tenant_id == ctx.org_id,
+                WorkflowRun.workspace_id == workspace_id,
+                WorkflowRun.entity_type == entity_type,
+                WorkflowRun.entity_id == entity_id,
+                WorkflowRun.status.in_(["pending", "active"]),
+            )
+        )
+        return result.scalar_one_or_none()
+
+
+    async def find_by_entity(
+        self,
+        workspace_id: uuid.UUID,
+        entity_type: str,
+        entity_id: uuid.UUID,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> tuple[list[WorkflowRun], str | None]:
+        """Cursor-paginated list of runs attached to an entity, newest-first."""
+        ctx = get_tenant_context()
+        stmt = (
+            select(WorkflowRun)
+            .where(
+                WorkflowRun.tenant_id == ctx.org_id,
+                WorkflowRun.workspace_id == workspace_id,
+                WorkflowRun.entity_type == entity_type,
+                WorkflowRun.entity_id == entity_id,
+            )
+            .order_by(WorkflowRun.started_at.desc(), WorkflowRun.id.desc())
+        )
+
+        if cursor:
+            try:
+                raw = base64.b64decode(cursor.encode()).decode()
+                ts_str, id_str = raw.split("|", 1)
+                cursor_ts = datetime.fromisoformat(ts_str)
+                cursor_id = uuid.UUID(id_str)
+                stmt = stmt.where(
+                    (WorkflowRun.started_at < cursor_ts)
+                    | (
+                        (WorkflowRun.started_at == cursor_ts)
+                        & (WorkflowRun.id < cursor_id)
+                    )
+                )
+            except Exception:
+                pass
+
+        result = await self._session.execute(stmt.limit(limit + 1))
+        rows = list(result.scalars().all())
+
+        has_more = len(rows) > limit
+        items = rows[:limit]
+        next_cursor: str | None = None
+        if has_more and items:
+            last = items[-1]
+            raw = f"{last.started_at.isoformat()}|{last.id}"
+            next_cursor = base64.b64encode(raw.encode()).decode()
+
+        return items, next_cursor
+
+    async def find_active_entity_run(
+        self,
+        workspace_id: uuid.UUID,
+        entity_type: str,
+        entity_id: uuid.UUID,
+    ) -> WorkflowRun | None:
+        """Return the single active/pending run for an entity, or None."""
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(WorkflowRun).where(
+                WorkflowRun.tenant_id == ctx.org_id,
+                WorkflowRun.workspace_id == workspace_id,
+                WorkflowRun.entity_type == entity_type,
+                WorkflowRun.entity_id == entity_id,
+                WorkflowRun.status.in_(["pending", "active"]),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def find_all_for_workspace(self, workspace_id: uuid.UUID) -> list[WorkflowRun]:
+        """Load all runs for a workspace (used by analytics service)."""
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            select(WorkflowRun)
+            .where(
+                WorkflowRun.tenant_id == ctx.org_id,
+                WorkflowRun.workspace_id == workspace_id,
+            )
+            .order_by(WorkflowRun.started_at.desc())
+        )
+        return list(result.scalars().all())
 
 
 class WorkflowRunStepRepo:

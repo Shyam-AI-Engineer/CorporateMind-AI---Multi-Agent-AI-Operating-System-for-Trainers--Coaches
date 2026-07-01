@@ -3,8 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
+  AttachEntityIn,
   BlockStepIn,
   CompleteStepIn,
+  EntityRunListPage,
   ReorderStepsIn,
   SkipStepIn,
   WorkflowRunIn,
@@ -288,6 +290,86 @@ export function useResumeStep(workspaceId: string, runId: string) {
       api.post<WorkflowRunStepOut>(`/api/v1/workflow-run-steps/${stepId}/resume`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: RUN_DETAIL_KEY(runId) });
+    },
+  });
+}
+
+// ── Entity integration hooks — Sprint 35 ─────────────────────────────────────
+
+const ENTITY_RUNS_KEY = (workspaceId: string, entityType: string, entityId: string) =>
+  ["workflow-runs", "entity", workspaceId, entityType, entityId] as const;
+
+const ACTIVE_ENTITY_KEY = (workspaceId: string, entityType: string, entityId: string) =>
+  ["workflow-runs", "entity-active", workspaceId, entityType, entityId] as const;
+
+export function useEntityRuns(
+  workspaceId: string | null | undefined,
+  entityType: string | null | undefined,
+  entityId: string | null | undefined,
+  options?: { cursor?: string },
+) {
+  const { cursor } = options ?? {};
+  return useQuery({
+    queryKey: ENTITY_RUNS_KEY(workspaceId ?? "", entityType ?? "", entityId ?? ""),
+    queryFn: () => {
+      const params = new URLSearchParams({ workspace_id: workspaceId! });
+      if (cursor) params.set("cursor", cursor);
+      return api.get<EntityRunListPage>(
+        `/api/v1/workflow-runs/entity/${entityType}/${entityId}?${params}`,
+      );
+    },
+    enabled: !!workspaceId && !!entityType && !!entityId,
+    staleTime: RUNS_STALE_MS,
+  });
+}
+
+export function useActiveEntityRun(
+  workspaceId: string | null | undefined,
+  entityType: string | null | undefined,
+  entityId: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: ACTIVE_ENTITY_KEY(workspaceId ?? "", entityType ?? "", entityId ?? ""),
+    queryFn: () => {
+      const params = new URLSearchParams({ workspace_id: workspaceId! });
+      return api.get<WorkflowRunOut | null>(
+        `/api/v1/workflow-runs/entity/${entityType}/${entityId}/active?${params}`,
+      );
+    },
+    enabled: !!workspaceId && !!entityType && !!entityId,
+    staleTime: RUNS_STALE_MS,
+  });
+}
+
+export function useAttachEntity(workspaceId: string, runId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AttachEntityIn) =>
+      api.post<WorkflowRunOut>(`/api/v1/workflow-runs/${runId}/attach`, data),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: RUN_DETAIL_KEY(runId) });
+      qc.invalidateQueries({ queryKey: ["workflow-runs", "list", workspaceId] });
+      if (result.entity_type && result.entity_id) {
+        qc.invalidateQueries({
+          queryKey: ENTITY_RUNS_KEY(workspaceId, result.entity_type, result.entity_id),
+        });
+        qc.invalidateQueries({
+          queryKey: ACTIVE_ENTITY_KEY(workspaceId, result.entity_type, result.entity_id),
+        });
+      }
+    },
+  });
+}
+
+export function useDetachEntity(workspaceId: string, runId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<WorkflowRunOut>(`/api/v1/workflow-runs/${runId}/detach`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: RUN_DETAIL_KEY(runId) });
+      qc.invalidateQueries({ queryKey: ["workflow-runs", "list", workspaceId] });
+      qc.invalidateQueries({ queryKey: ["workflow-runs", "entity"] });
     },
   });
 }

@@ -106,6 +106,10 @@ def _make_run(
     run.completed_at = None
     run.cancelled_at = None
     run.run_steps = []
+    # Sprint 35: entity fields must be None (not MagicMock) for Pydantic validation
+    run.entity_type = None
+    run.entity_id = None
+    run.entity_title = None
     return run
 
 

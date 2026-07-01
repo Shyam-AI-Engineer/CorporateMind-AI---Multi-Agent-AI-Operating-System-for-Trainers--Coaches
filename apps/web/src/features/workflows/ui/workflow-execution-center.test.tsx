@@ -19,6 +19,11 @@ vi.mock("@/features/workflows/api/use-workflows", () => ({
   useSkipStep: vi.fn(),
   useBlockStep: vi.fn(),
   useResumeStep: vi.fn(),
+  // Sprint 35 — entity hooks (not directly tested here; kept for mock completeness)
+  useAttachEntity: vi.fn(() => ({ mutate: () => {}, isPending: false })),
+  useDetachEntity: vi.fn(() => ({ mutate: () => {}, isPending: false })),
+  useEntityRuns: vi.fn(() => ({ data: { items: [], next_cursor: null, has_more: false }, isLoading: false, error: null })),
+  useActiveEntityRun: vi.fn(() => ({ data: null, isLoading: false, error: null })),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -90,6 +95,10 @@ function makeRun(overrides: Partial<WorkflowRunOut> = {}): WorkflowRunOut {
     started_at: "2026-06-29T10:00:00Z",
     completed_at: null,
     cancelled_at: null,
+    // Sprint 35: entity fields default to null
+    entity_type: null,
+    entity_id: null,
+    entity_title: null,
     run_steps: [],
     ...overrides,
   };
