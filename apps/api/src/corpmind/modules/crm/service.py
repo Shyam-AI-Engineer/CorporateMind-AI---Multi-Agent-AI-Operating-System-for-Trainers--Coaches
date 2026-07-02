@@ -41,12 +41,20 @@ from corpmind.modules.crm.schemas import (
     BookingWebhookPayload,
     FollowUpTaskListOut,
     FollowUpTaskOut,
+    IndustryAnalysisItem,
+    IndustryAnalysisOut,
+    LeadConversionOut,
     LeadCreate,
     LeadListOut,
     LeadOut,
+    LeadPipelineSummaryOut,
     PipelineStageCount,
     PipelineStats,
+    SourceAnalysisItem,
+    SourceAnalysisOut,
     StageAdvanceResponse,
+    StageAnalysisItem,
+    StageAnalysisOut,
 )
 
 log = structlog.get_logger(__name__)
@@ -451,3 +459,412 @@ class CRMService:
 def _log_event(event: object) -> None:
     """Structured-log a domain event until a real event bus is wired up."""
     log.info("crm.domain_event", event_type=type(event).__name__, payload=repr(event))
+
+
+# ── Lead Pipeline Analytics — Sprint 40 ───────────────────────────────────────
+
+_PIPELINE_TTL = 900
+
+# Stage order for funnel analysis (terminal stages handled separately)
+_STAGE_ORDER = ["discovered", "engaged", "meeting_scheduled", "meeting_completed", "booked"]
+_TERMINAL_STAGES = {"booked", "lost"}
+_QUALIFIED_STAGES = {"meeting_completed", "booked"}
+
+
+def _pipeline_summary_key(org_id: uuid.UUID, workspace_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{workspace_id}:lead_pipeline_summary"
+
+
+def _pipeline_stages_key(org_id: uuid.UUID, workspace_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{workspace_id}:lead_pipeline_stages"
+
+
+def _pipeline_sources_key(org_id: uuid.UUID, workspace_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{workspace_id}:lead_pipeline_sources"
+
+
+def _pipeline_industries_key(org_id: uuid.UUID, workspace_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{workspace_id}:lead_pipeline_industries"
+
+
+def _pipeline_conversion_key(org_id: uuid.UUID, workspace_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{workspace_id}:lead_pipeline_conversion"
+
+
+class LeadPipelineAnalyticsService:
+    """Read-only analytics over the CRM lead pipeline.
+
+    All methods are strictly read-only: no writes, no mutations, no AI.
+    Cross-table access (hr_contacts, companies) uses raw SQL to avoid
+    cross-module model imports.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_summary(self, workspace_id: uuid.UUID) -> LeadPipelineSummaryOut:
+        from corpmind.core.redis import get_redis
+
+        ctx = get_tenant_context()
+        key = _pipeline_summary_key(ctx.org_id, workspace_id)
+        try:
+            cached = await get_redis().get(key)
+            if cached:
+                return LeadPipelineSummaryOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        rows = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT
+                        l.stage,
+                        COUNT(*) AS cnt,
+                        SUM(CASE WHEN l.updated_at < l.created_at THEN 1 ELSE 0 END) AS bad_ts
+                    FROM leads l
+                    WHERE l.tenant_id = :tenant_id
+                      AND l.workspace_id = :workspace_id
+                    GROUP BY l.stage
+                    """
+                ),
+                {"tenant_id": ctx.org_id, "workspace_id": workspace_id},
+            )
+        ).fetchall()
+
+        stage_counts: dict[str, int] = {}
+        bad_ts_total = 0
+        for row in rows:
+            stage_counts[row.stage] = int(row.cnt)
+            bad_ts_total += int(row.bad_ts)
+
+        # Proposal-linked leads (subquery avoids cross-module model import)
+        proposal_row = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT COUNT(DISTINCT l.id) AS cnt
+                    FROM leads l
+                    JOIN proposals p ON p.lead_id = l.id AND p.tenant_id = l.tenant_id
+                    WHERE l.tenant_id = :tenant_id
+                      AND l.workspace_id = :workspace_id
+                    """
+                ),
+                {"tenant_id": ctx.org_id, "workspace_id": workspace_id},
+            )
+        ).fetchone()
+
+        total_leads = sum(stage_counts.values())
+        won_leads = stage_counts.get("booked", 0)
+        lost_leads = stage_counts.get("lost", 0)
+        qualified_leads = stage_counts.get("meeting_completed", 0)
+        active_leads = total_leads - won_leads - lost_leads
+        proposal_leads = int(proposal_row.cnt) if proposal_row else 0
+        overall_conversion_rate = round(won_leads / total_leads * 100, 2) if total_leads > 0 else 0.0
+        pipeline_health_score = round(
+            (won_leads + qualified_leads) / total_leads * 100, 1
+        ) if total_leads > 0 else 0.0
+
+        result = LeadPipelineSummaryOut(
+            total_leads=total_leads,
+            active_leads=active_leads,
+            qualified_leads=qualified_leads,
+            proposal_leads=proposal_leads,
+            won_leads=won_leads,
+            lost_leads=lost_leads,
+            overall_conversion_rate=overall_conversion_rate,
+            pipeline_health_score=pipeline_health_score,
+            data_integrity_warning=bad_ts_total > 0,
+        )
+        try:
+            await get_redis().set(key, result.model_dump_json(), ex=_PIPELINE_TTL)
+        except Exception:
+            pass
+        return result
+
+    async def get_stage_analysis(self, workspace_id: uuid.UUID) -> StageAnalysisOut:
+        from corpmind.core.redis import get_redis
+
+        ctx = get_tenant_context()
+        key = _pipeline_stages_key(ctx.org_id, workspace_id)
+        try:
+            cached = await get_redis().get(key)
+            if cached:
+                return StageAnalysisOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        rows = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT
+                        l.stage,
+                        COUNT(*) AS cnt,
+                        AVG(
+                            EXTRACT(EPOCH FROM (NOW() - l.created_at)) / 86400.0
+                        ) AS avg_days
+                    FROM leads l
+                    WHERE l.tenant_id = :tenant_id
+                      AND l.workspace_id = :workspace_id
+                    GROUP BY l.stage
+                    """
+                ),
+                {"tenant_id": ctx.org_id, "workspace_id": workspace_id},
+            )
+        ).fetchall()
+
+        stage_counts: dict[str, int] = {r.stage: int(r.cnt) for r in rows}
+        stage_avg_days: dict[str, float] = {
+            r.stage: round(float(r.avg_days or 0.0), 2) for r in rows
+        }
+
+        total = sum(stage_counts.values())
+        lost_count = stage_counts.get("lost", 0)
+        non_lost = total - lost_count
+
+        items: list[StageAnalysisItem] = []
+        for stage in _STAGE_ORDER:
+            count = stage_counts.get(stage, 0)
+            # conversion_rate: % of all non-lost leads at this stage or beyond
+            stage_idx = _STAGE_ORDER.index(stage)
+            at_or_beyond = sum(
+                stage_counts.get(s, 0) for s in _STAGE_ORDER[stage_idx:]
+            )
+            conversion_rate = round(at_or_beyond / non_lost * 100, 1) if non_lost > 0 else 0.0
+            # drop_off_rate: of leads that reached this stage, % that didn't advance
+            next_stages = sum(
+                stage_counts.get(s, 0) for s in _STAGE_ORDER[stage_idx + 1:]
+            )
+            at_or_beyond_count = count + next_stages
+            drop_off_rate = (
+                round(count / at_or_beyond_count * 100, 1)
+                if at_or_beyond_count > 0
+                else 0.0
+            )
+            items.append(
+                StageAnalysisItem(
+                    stage=stage,
+                    count=count,
+                    average_days=stage_avg_days.get(stage, 0.0),
+                    conversion_rate=conversion_rate,
+                    drop_off_rate=drop_off_rate,
+                )
+            )
+        # Append lost stage
+        lost_avg = stage_avg_days.get("lost", 0.0)
+        items.append(
+            StageAnalysisItem(
+                stage="lost",
+                count=lost_count,
+                average_days=lost_avg,
+                conversion_rate=0.0,
+                drop_off_rate=100.0 if lost_count > 0 else 0.0,
+            )
+        )
+
+        result = StageAnalysisOut(items=items)
+        try:
+            await get_redis().set(key, result.model_dump_json(), ex=_PIPELINE_TTL)
+        except Exception:
+            pass
+        return result
+
+    async def get_source_analysis(self, workspace_id: uuid.UUID) -> SourceAnalysisOut:
+        from corpmind.core.redis import get_redis
+
+        ctx = get_tenant_context()
+        key = _pipeline_sources_key(ctx.org_id, workspace_id)
+        try:
+            cached = await get_redis().get(key)
+            if cached:
+                return SourceAnalysisOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        rows = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT
+                        COALESCE(hc.source, 'unknown') AS source,
+                        COUNT(l.id) AS lead_count,
+                        SUM(CASE WHEN l.stage IN ('meeting_completed', 'booked') THEN 1 ELSE 0 END) AS qualified,
+                        SUM(CASE WHEN l.stage = 'booked' THEN 1 ELSE 0 END) AS won
+                    FROM leads l
+                    LEFT JOIN hr_contacts hc
+                        ON l.contact_id = hc.id AND hc.tenant_id = l.tenant_id
+                    WHERE l.tenant_id = :tenant_id
+                      AND l.workspace_id = :workspace_id
+                    GROUP BY COALESCE(hc.source, 'unknown')
+                    ORDER BY COUNT(l.id) DESC
+                    """
+                ),
+                {"tenant_id": ctx.org_id, "workspace_id": workspace_id},
+            )
+        ).fetchall()
+
+        items = []
+        for row in rows:
+            lead_count = int(row.lead_count)
+            won = int(row.won)
+            conversion_rate = round(won / lead_count * 100, 2) if lead_count > 0 else 0.0
+            items.append(
+                SourceAnalysisItem(
+                    source=row.source,
+                    lead_count=lead_count,
+                    qualified=int(row.qualified),
+                    won=won,
+                    conversion_rate=conversion_rate,
+                )
+            )
+
+        result = SourceAnalysisOut(items=items)
+        try:
+            await get_redis().set(key, result.model_dump_json(), ex=_PIPELINE_TTL)
+        except Exception:
+            pass
+        return result
+
+    async def get_industry_analysis(self, workspace_id: uuid.UUID) -> IndustryAnalysisOut:
+        from corpmind.core.redis import get_redis
+
+        ctx = get_tenant_context()
+        key = _pipeline_industries_key(ctx.org_id, workspace_id)
+        try:
+            cached = await get_redis().get(key)
+            if cached:
+                return IndustryAnalysisOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        rows = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT
+                        COALESCE(c.industry, 'unknown') AS industry,
+                        COUNT(l.id) AS lead_count,
+                        SUM(CASE WHEN l.stage = 'booked' THEN 1 ELSE 0 END) AS won,
+                        AVG(
+                            EXTRACT(EPOCH FROM (
+                                COALESCE(l.booked_at, NOW()) - l.created_at
+                            )) / 86400.0
+                        ) AS avg_pipeline_days
+                    FROM leads l
+                    LEFT JOIN hr_contacts hc
+                        ON l.contact_id = hc.id AND hc.tenant_id = l.tenant_id
+                    LEFT JOIN companies c
+                        ON hc.company_id = c.id AND c.tenant_id = l.tenant_id
+                    WHERE l.tenant_id = :tenant_id
+                      AND l.workspace_id = :workspace_id
+                    GROUP BY COALESCE(c.industry, 'unknown')
+                    ORDER BY COUNT(l.id) DESC
+                    """
+                ),
+                {"tenant_id": ctx.org_id, "workspace_id": workspace_id},
+            )
+        ).fetchall()
+
+        items = []
+        for row in rows:
+            lead_count = int(row.lead_count)
+            won = int(row.won)
+            conversion_rate = round(won / lead_count * 100, 2) if lead_count > 0 else 0.0
+            items.append(
+                IndustryAnalysisItem(
+                    industry=row.industry,
+                    lead_count=lead_count,
+                    won=won,
+                    conversion_rate=conversion_rate,
+                    average_pipeline_days=round(float(row.avg_pipeline_days or 0.0), 2),
+                )
+            )
+
+        result = IndustryAnalysisOut(items=items)
+        try:
+            await get_redis().set(key, result.model_dump_json(), ex=_PIPELINE_TTL)
+        except Exception:
+            pass
+        return result
+
+    async def get_conversion(self, workspace_id: uuid.UUID) -> LeadConversionOut:
+        from corpmind.core.redis import get_redis
+
+        ctx = get_tenant_context()
+        key = _pipeline_conversion_key(ctx.org_id, workspace_id)
+        try:
+            cached = await get_redis().get(key)
+            if cached:
+                return LeadConversionOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        # Stage counts and booked_at durations in one pass
+        stage_row = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT
+                        SUM(CASE WHEN stage IN ('meeting_completed', 'booked') THEN 1 ELSE 0 END) AS qualified_count,
+                        SUM(CASE WHEN stage = 'booked' THEN 1 ELSE 0 END) AS won_count,
+                        COUNT(*) AS total_count,
+                        AVG(
+                            CASE WHEN stage = 'booked' AND booked_at IS NOT NULL
+                                 THEN EXTRACT(EPOCH FROM (booked_at - created_at)) / 86400.0
+                            END
+                        ) AS avg_days_to_win
+                    FROM leads
+                    WHERE tenant_id = :tenant_id
+                      AND workspace_id = :workspace_id
+                    """
+                ),
+                {"tenant_id": ctx.org_id, "workspace_id": workspace_id},
+            )
+        ).fetchone()
+
+        # Proposal counts for conversion funnel
+        proposal_row = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT
+                        COUNT(DISTINCT l.id) AS proposal_leads,
+                        SUM(CASE WHEN l.stage = 'booked' THEN 1 ELSE 0 END) AS won_with_proposal
+                    FROM leads l
+                    JOIN proposals p ON p.lead_id = l.id AND p.tenant_id = l.tenant_id
+                    WHERE l.tenant_id = :tenant_id
+                      AND l.workspace_id = :workspace_id
+                    """
+                ),
+                {"tenant_id": ctx.org_id, "workspace_id": workspace_id},
+            )
+        ).fetchone()
+
+        qualified_count = int(stage_row.qualified_count or 0) if stage_row else 0
+        won_count = int(stage_row.won_count or 0) if stage_row else 0
+        total_count = int(stage_row.total_count or 0) if stage_row else 0
+        avg_days_to_win = round(float(stage_row.avg_days_to_win or 0.0), 2) if stage_row else 0.0
+
+        proposal_leads = int(proposal_row.proposal_leads or 0) if proposal_row else 0
+        won_with_proposal = int(proposal_row.won_with_proposal or 0) if proposal_row else 0
+
+        qualified_to_proposal = (
+            round(proposal_leads / qualified_count * 100, 2) if qualified_count > 0 else 0.0
+        )
+        proposal_to_win = (
+            round(won_with_proposal / proposal_leads * 100, 2) if proposal_leads > 0 else 0.0
+        )
+        overall_win_rate = round(won_count / total_count * 100, 2) if total_count > 0 else 0.0
+
+        result = LeadConversionOut(
+            qualified_to_proposal=qualified_to_proposal,
+            proposal_to_win=proposal_to_win,
+            overall_win_rate=overall_win_rate,
+            average_days_to_win=avg_days_to_win,
+        )
+        try:
+            await get_redis().set(key, result.model_dump_json(), ex=_PIPELINE_TTL)
+        except Exception:
+            pass
+        return result

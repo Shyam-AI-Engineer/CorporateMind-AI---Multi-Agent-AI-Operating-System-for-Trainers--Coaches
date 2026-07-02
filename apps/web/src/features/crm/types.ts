@@ -167,6 +167,63 @@ export const FOLLOW_UP_STATUS_CONFIG: Record<
 };
 
 
+// ── Lead Pipeline Analytics — Sprint 40 ─────────────────────────────────────
+
+export interface LeadPipelineSummaryOut {
+  total_leads: number;
+  active_leads: number;
+  qualified_leads: number;
+  proposal_leads: number;
+  won_leads: number;
+  lost_leads: number;
+  overall_conversion_rate: number;
+  pipeline_health_score: number;
+  data_integrity_warning: boolean;
+}
+
+export interface StageAnalysisItem {
+  stage: string;
+  count: number;
+  average_days: number;
+  conversion_rate: number;
+  drop_off_rate: number;
+}
+
+export interface StageAnalysisOut {
+  items: StageAnalysisItem[];
+}
+
+export interface SourceAnalysisItem {
+  source: string;
+  lead_count: number;
+  qualified: number;
+  won: number;
+  conversion_rate: number;
+}
+
+export interface SourceAnalysisOut {
+  items: SourceAnalysisItem[];
+}
+
+export interface IndustryAnalysisItem {
+  industry: string;
+  lead_count: number;
+  won: number;
+  conversion_rate: number;
+  average_pipeline_days: number;
+}
+
+export interface IndustryAnalysisOut {
+  items: IndustryAnalysisItem[];
+}
+
+export interface LeadConversionOut {
+  qualified_to_proposal: number;
+  proposal_to_win: number;
+  overall_win_rate: number;
+  average_days_to_win: number;
+}
+
 export const STAGE_CONFIG: Record<
   string,
   { label: string; colorClass: string; bgClass: string; borderClass: string }

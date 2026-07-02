@@ -42,7 +42,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard",  label: "Dashboard",      icon: LayoutDashboard },
   { href: "/trainer",    label: "Trainer Profile", icon: UserCircle },
-  { href: "/crm",        label: "CRM Pipeline",    icon: TrendingUp },
+  { href: "/crm",           label: "CRM Pipeline",          icon: TrendingUp },
+  { href: "/lead-pipeline", label: "Lead Pipeline Analytics", icon: BarChart },
   { href: "/inbox",      label: "Inbox",           icon: Mail },
   { href: "/campaigns",  label: "Campaigns",       icon: Megaphone },
   { href: "/outreach",   label: "Outreach",        icon: Send },

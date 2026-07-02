@@ -266,3 +266,77 @@ async def set_meeting_time(
     session: AsyncSession = Depends(get_session),
 ) -> LeadOut:
     return await CRMService(session).schedule_meeting(lead_id, req.meeting_at)
+
+
+# ── Lead Pipeline Analytics router — Sprint 40 ────────────────────────────────
+
+from corpmind.modules.crm.schemas import (  # noqa: E402
+    IndustryAnalysisOut,
+    LeadConversionOut,
+    LeadPipelineSummaryOut,
+    SourceAnalysisOut,
+    StageAnalysisOut,
+)
+from corpmind.modules.crm.service import LeadPipelineAnalyticsService  # noqa: E402
+
+lead_pipeline_router = APIRouter()
+
+
+@lead_pipeline_router.get(
+    "/summary",
+    response_model=LeadPipelineSummaryOut,
+    summary="Lead pipeline health summary",
+)
+async def lead_pipeline_summary(
+    workspace_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> LeadPipelineSummaryOut:
+    return await LeadPipelineAnalyticsService(session).get_summary(workspace_id)
+
+
+@lead_pipeline_router.get(
+    "/stages",
+    response_model=StageAnalysisOut,
+    summary="Stage-by-stage funnel analysis",
+)
+async def lead_pipeline_stages(
+    workspace_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> StageAnalysisOut:
+    return await LeadPipelineAnalyticsService(session).get_stage_analysis(workspace_id)
+
+
+@lead_pipeline_router.get(
+    "/sources",
+    response_model=SourceAnalysisOut,
+    summary="Lead source performance breakdown",
+)
+async def lead_pipeline_sources(
+    workspace_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> SourceAnalysisOut:
+    return await LeadPipelineAnalyticsService(session).get_source_analysis(workspace_id)
+
+
+@lead_pipeline_router.get(
+    "/industries",
+    response_model=IndustryAnalysisOut,
+    summary="Industry-level pipeline analysis",
+)
+async def lead_pipeline_industries(
+    workspace_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> IndustryAnalysisOut:
+    return await LeadPipelineAnalyticsService(session).get_industry_analysis(workspace_id)
+
+
+@lead_pipeline_router.get(
+    "/conversion",
+    response_model=LeadConversionOut,
+    summary="Conversion funnel metrics",
+)
+async def lead_pipeline_conversion(
+    workspace_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> LeadConversionOut:
+    return await LeadPipelineAnalyticsService(session).get_conversion(workspace_id)

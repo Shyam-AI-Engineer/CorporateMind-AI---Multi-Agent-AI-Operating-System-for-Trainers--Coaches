@@ -226,3 +226,60 @@ class WorkspaceBookingWebhookOut(BaseModel):
     # Secret is returned on GET so trainers can copy it; visible only to OrgAdmins.
     # Treat like a password — display once, can be regenerated at any time.
     secret: str | None = None
+
+
+# ── Lead Pipeline Analytics schemas — Sprint 40 ────────────────────────────────
+
+class LeadPipelineSummaryOut(BaseModel):
+    total_leads: int
+    active_leads: int
+    qualified_leads: int
+    proposal_leads: int
+    won_leads: int
+    lost_leads: int
+    overall_conversion_rate: float
+    pipeline_health_score: float
+    data_integrity_warning: bool
+
+
+class StageAnalysisItem(BaseModel):
+    stage: str
+    count: int
+    average_days: float
+    conversion_rate: float
+    drop_off_rate: float
+
+
+class StageAnalysisOut(BaseModel):
+    items: list[StageAnalysisItem]
+
+
+class SourceAnalysisItem(BaseModel):
+    source: str
+    lead_count: int
+    qualified: int
+    won: int
+    conversion_rate: float
+
+
+class SourceAnalysisOut(BaseModel):
+    items: list[SourceAnalysisItem]
+
+
+class IndustryAnalysisItem(BaseModel):
+    industry: str
+    lead_count: int
+    won: int
+    conversion_rate: float
+    average_pipeline_days: float
+
+
+class IndustryAnalysisOut(BaseModel):
+    items: list[IndustryAnalysisItem]
+
+
+class LeadConversionOut(BaseModel):
+    qualified_to_proposal: float
+    proposal_to_win: float
+    overall_win_rate: float
+    average_days_to_win: float
