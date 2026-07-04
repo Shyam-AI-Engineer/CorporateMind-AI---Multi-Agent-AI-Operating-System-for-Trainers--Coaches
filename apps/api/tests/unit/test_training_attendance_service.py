@@ -19,6 +19,7 @@ from corpmind.modules.training.schemas import (
     CheckOutAttendance,
     TrainingAttendanceCreate,
     TrainingAttendanceFilters,
+    TrainingAttendanceOut,
     TrainingAttendanceUpdate,
     VALID_ATTENDANCE_STATUSES,
 )
@@ -1516,3 +1517,18 @@ class TestAttendanceSchemas:
     def test_filters_attendance_status_optional(self):
         f = TrainingAttendanceFilters(workspace_id=_WS)
         assert f.attendance_status is None
+
+    def test_checkout_all_fields_optional(self):
+        req = CheckOutAttendance()
+        assert req.check_out_time is None
+        assert req.completion_percent is None
+        assert req.certificate_eligible is None
+
+    def test_out_schema_has_required_attendance_fields(self):
+        fields = TrainingAttendanceOut.model_fields
+        for required in ("id", "session_id", "participant_name", "attendance_status", "certificate_eligible"):
+            assert required in fields, f"missing field: {required}"
+
+    def test_filters_cursor_defaults_none(self):
+        f = TrainingAttendanceFilters(workspace_id=_WS)
+        assert f.cursor is None
