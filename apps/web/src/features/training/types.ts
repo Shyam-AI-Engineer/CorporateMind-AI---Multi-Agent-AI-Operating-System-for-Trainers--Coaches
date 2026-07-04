@@ -122,3 +122,191 @@ export const TRAINING_PRIORITIES: TrainingPriority[] = [
   "high",
   "urgent",
 ];
+
+// ── Training Session types ─────────────────────────────────────────────────────
+
+export type SessionStatus =
+  | "planned"
+  | "scheduled"
+  | "in_progress"
+  | "completed"
+  | "cancelled";
+
+export const SESSION_STATUSES: SessionStatus[] = [
+  "planned",
+  "scheduled",
+  "in_progress",
+  "completed",
+  "cancelled",
+];
+
+export interface TrainingSession {
+  id: string;
+  tenant_id: string;
+  workspace_id: string;
+  engagement_id: string;
+  session_name: string;
+  session_number: number | null;
+  status: SessionStatus;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  actual_start: string | null;
+  actual_end: string | null;
+  trainer_id: string | null;
+  location: string | null;
+  meeting_link: string | null;
+  capacity: number | null;
+  expected_attendees: number | null;
+  actual_attendees: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrainingSessionListOut {
+  items: TrainingSession[];
+  next_cursor: string | null;
+  has_more: boolean;
+  total: number;
+}
+
+export interface TrainingSessionCreate {
+  workspace_id: string;
+  engagement_id: string;
+  session_name: string;
+  session_number?: number;
+  status?: SessionStatus;
+  scheduled_start?: string;
+  scheduled_end?: string;
+  trainer_id?: string;
+  location?: string;
+  meeting_link?: string;
+  capacity?: number;
+  expected_attendees?: number;
+  notes?: string;
+}
+
+export interface TrainingSessionUpdate {
+  session_name?: string;
+  session_number?: number;
+  scheduled_start?: string;
+  scheduled_end?: string;
+  location?: string;
+  meeting_link?: string;
+  capacity?: number;
+  expected_attendees?: number;
+  notes?: string;
+}
+
+export interface CompleteSession {
+  actual_end?: string;
+  actual_attendees?: number;
+  notes?: string;
+}
+
+export interface CancelSession {
+  notes?: string;
+}
+
+export interface SessionTrainerAssign {
+  trainer_id: string;
+}
+
+export interface TrainingSessionFilters {
+  workspace_id: string;
+  engagement_id?: string;
+  trainer_id?: string;
+  status?: SessionStatus;
+  date_from?: string;
+  date_to?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+// ── Attendance types ───────────────────────────────────────────────────────────
+
+export type AttendanceStatus =
+  | "registered"
+  | "present"
+  | "late"
+  | "absent"
+  | "left_early";
+
+export const ATTENDANCE_STATUSES: AttendanceStatus[] = [
+  "registered",
+  "present",
+  "late",
+  "absent",
+  "left_early",
+];
+
+export interface TrainingAttendance {
+  id: string;
+  tenant_id: string;
+  workspace_id: string;
+  session_id: string;
+  participant_name: string;
+  participant_email: string | null;
+  participant_phone: string | null;
+  company: string | null;
+  designation: string | null;
+  attendance_status: AttendanceStatus;
+  check_in_time: string | null;
+  check_out_time: string | null;
+  completion_percent: number | null;
+  certificate_eligible: boolean;
+  remarks: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrainingAttendanceListOut {
+  items: TrainingAttendance[];
+  next_cursor: string | null;
+  has_more: boolean;
+  total: number;
+}
+
+export interface TrainingAttendanceCreate {
+  workspace_id: string;
+  session_id: string;
+  participant_name: string;
+  participant_email?: string;
+  participant_phone?: string;
+  company?: string;
+  designation?: string;
+  attendance_status?: AttendanceStatus;
+  check_in_time?: string;
+  completion_percent?: number;
+  certificate_eligible?: boolean;
+  remarks?: string;
+}
+
+export interface TrainingAttendanceUpdate {
+  participant_name?: string;
+  participant_email?: string;
+  participant_phone?: string;
+  company?: string;
+  designation?: string;
+  check_in_time?: string;
+  check_out_time?: string;
+  completion_percent?: number;
+  certificate_eligible?: boolean;
+  remarks?: string;
+}
+
+export interface CheckOutAttendance {
+  check_out_time?: string;
+  completion_percent?: number;
+  certificate_eligible?: boolean;
+}
+
+export interface TrainingAttendanceFilters {
+  workspace_id: string;
+  session_id?: string;
+  attendance_status?: AttendanceStatus;
+  company?: string;
+  search?: string;
+  cursor?: string;
+  limit?: number;
+}

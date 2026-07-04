@@ -1,4 +1,4 @@
-"""Training Engagement domain events — Sprint 42."""
+"""Training Engagement, Session, and Attendance domain events — Sprint 42/43/44."""
 
 from __future__ import annotations
 
@@ -54,4 +54,94 @@ class CoordinatorAssigned:
     engagement_id: uuid.UUID
     tenant_id: uuid.UUID
     coordinator_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+# ── Session events ────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class TrainingSessionCreated:
+    session_id: uuid.UUID
+    engagement_id: uuid.UUID
+    tenant_id: uuid.UUID
+    workspace_id: uuid.UUID
+    session_name: str
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class TrainingSessionStarted:
+    session_id: uuid.UUID
+    engagement_id: uuid.UUID
+    tenant_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class TrainingSessionCompleted:
+    session_id: uuid.UUID
+    engagement_id: uuid.UUID
+    tenant_id: uuid.UUID
+    actual_attendees: int | None
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class TrainingSessionCancelled:
+    session_id: uuid.UUID
+    engagement_id: uuid.UUID
+    tenant_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class TrainingSessionTrainerAssigned:
+    session_id: uuid.UUID
+    engagement_id: uuid.UUID
+    tenant_id: uuid.UUID
+    trainer_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+# ── Attendance events ─────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class ParticipantRegistered:
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    tenant_id: uuid.UUID
+    participant_name: str
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ParticipantPresent:
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    tenant_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ParticipantLate:
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    tenant_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ParticipantAbsent:
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    tenant_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ParticipantCheckedOut:
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    tenant_id: uuid.UUID
+    check_out_time: datetime
     occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))

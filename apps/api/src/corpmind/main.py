@@ -167,6 +167,8 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.workflows.api import observability_router as workflow_observability_router
     from corpmind.modules.customers.api import router as customers_router
     from corpmind.modules.training.api import router as training_router
+    from corpmind.modules.training.api import sessions_router as training_sessions_router
+    from corpmind.modules.training.api import attendance_router as training_attendance_router
 
     app.include_router(identity_router, prefix="/api/v1/identity", tags=["identity"])
     app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["inbox"])
@@ -179,6 +181,8 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(lead_pipeline_router, prefix="/api/v1/lead-pipeline", tags=["lead-pipeline"])
     app.include_router(customers_router, prefix="/api/v1/customers", tags=["customers"])
     app.include_router(training_router, prefix="/api/v1/training-engagements", tags=["training"])
+    app.include_router(training_sessions_router, prefix="/api/v1/training-sessions", tags=["training"])
+    app.include_router(training_attendance_router, prefix="/api/v1/training-attendance", tags=["training"])
     app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
     app.include_router(billing_router, prefix="/api/v1/billing", tags=["billing"])
     app.include_router(social_router, prefix="/api/v1/social", tags=["social"])
