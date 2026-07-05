@@ -1,4 +1,4 @@
-"""Training Engagement, Session, and Attendance REST API — Sprint 42/43/44."""
+"""Training Engagement, Session, Attendance, and Certificate REST API — Sprint 42–45."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from corpmind.modules.training.schemas import (
     CompleteEngagement,
     CompleteSession,
     CoordinatorAssign,
+    IssueCertificate,
+    RevokeCertificate,
     SessionTrainerAssign,
     TrainerAssign,
     TrainingAttendanceCreate,
@@ -23,6 +25,11 @@ from corpmind.modules.training.schemas import (
     TrainingAttendanceListOut,
     TrainingAttendanceOut,
     TrainingAttendanceUpdate,
+    TrainingCertificateCreate,
+    TrainingCertificateFilters,
+    TrainingCertificateListOut,
+    TrainingCertificateOut,
+    TrainingCertificateUpdate,
     TrainingEngagementCreate,
     TrainingEngagementFilters,
     TrainingEngagementListOut,
@@ -36,6 +43,7 @@ from corpmind.modules.training.schemas import (
 )
 from corpmind.modules.training.service import (
     TrainingAttendanceService,
+    TrainingCertificateService,
     TrainingEngagementService,
     TrainingSessionService,
 )
@@ -43,6 +51,7 @@ from corpmind.modules.training.service import (
 router = APIRouter()
 sessions_router = APIRouter()
 attendance_router = APIRouter()
+certificates_router = APIRouter()
 
 
 @router.post(
@@ -454,3 +463,109 @@ async def check_out(
     session: AsyncSession = Depends(get_session),
 ) -> TrainingAttendanceOut:
     return await TrainingAttendanceService(session).check_out(attendance_id, req)
+
+
+# ── Certificate endpoints ──────────────────────────────────────────────────────
+
+@certificates_router.post(
+    "/",
+    response_model=TrainingCertificateOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a certificate for an eligible attendance record",
+)
+async def create_certificate(
+    req: TrainingCertificateCreate,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingCertificateOut:
+    return await TrainingCertificateService(session).create_certificate(req)
+
+
+@certificates_router.get(
+    "/",
+    response_model=TrainingCertificateListOut,
+    summary="List certificates (cursor-paginated)",
+)
+async def list_certificates(
+    workspace_id: uuid.UUID = Query(...),
+    session_id: uuid.UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    issued_by: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+) -> TrainingCertificateListOut:
+    filters = TrainingCertificateFilters(
+        workspace_id=workspace_id,
+        session_id=session_id,
+        status=status_filter,
+        issued_by=issued_by,
+        search=search,
+        cursor=cursor,
+        limit=limit,
+    )
+    return await TrainingCertificateService(session).list_certificates(filters)
+
+
+# verify MUST be declared before /{cert_id} so FastAPI doesn't parse "verify" as a UUID
+@certificates_router.get(
+    "/verify/{verification_code}",
+    response_model=TrainingCertificateOut,
+    summary="Verify a certificate by its verification code",
+)
+async def verify_certificate(
+    verification_code: str,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingCertificateOut:
+    return await TrainingCertificateService(session).verify_certificate(verification_code)
+
+
+@certificates_router.get(
+    "/{cert_id}",
+    response_model=TrainingCertificateOut,
+    summary="Get a certificate by ID",
+)
+async def get_certificate(
+    cert_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingCertificateOut:
+    return await TrainingCertificateService(session).get_certificate(cert_id)
+
+
+@certificates_router.patch(
+    "/{cert_id}",
+    response_model=TrainingCertificateOut,
+    summary="Update a draft certificate",
+)
+async def update_certificate(
+    cert_id: uuid.UUID,
+    req: TrainingCertificateUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingCertificateOut:
+    return await TrainingCertificateService(session).update_certificate(cert_id, req)
+
+
+@certificates_router.post(
+    "/{cert_id}/issue",
+    response_model=TrainingCertificateOut,
+    summary="Issue a draft certificate",
+)
+async def issue_certificate(
+    cert_id: uuid.UUID,
+    req: IssueCertificate,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingCertificateOut:
+    return await TrainingCertificateService(session).issue_certificate(cert_id, req)
+
+
+@certificates_router.post(
+    "/{cert_id}/revoke",
+    response_model=TrainingCertificateOut,
+    summary="Revoke a certificate",
+)
+async def revoke_certificate(
+    cert_id: uuid.UUID,
+    req: RevokeCertificate,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingCertificateOut:
+    return await TrainingCertificateService(session).revoke_certificate(cert_id, req)

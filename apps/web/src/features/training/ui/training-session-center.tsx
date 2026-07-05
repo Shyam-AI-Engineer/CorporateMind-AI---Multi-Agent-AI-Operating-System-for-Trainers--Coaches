@@ -20,6 +20,7 @@ import type {
   SessionTrainerAssign,
 } from "@/features/training/types";
 import { SESSION_STATUSES } from "@/features/training/types";
+import { CertificateCenter } from "@/features/training/ui/certificate-center";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -662,6 +663,9 @@ function SessionDrawer({
   onClose: () => void;
 }) {
   const [modal, setModal] = useState<ModalState>(null);
+  const [drawerTab, setDrawerTab] = useState<"overview" | "certificates">(
+    "overview",
+  );
   const start = useStartSession(workspaceId);
 
   const canStart =
@@ -694,143 +698,182 @@ function SessionDrawer({
           </button>
         </div>
 
-        <div className="space-y-4 p-4">
-          <div className="flex items-center gap-2">
-            <SessionStatusBadge status={session.status} />
-          </div>
+        {/* Tab bar */}
+        <div className="flex border-b">
+          <button
+            data-testid="drawer-tab-overview"
+            onClick={() => setDrawerTab("overview")}
+            className={`px-4 py-2 text-sm font-medium ${
+              drawerTab === "overview"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Overview
+          </button>
+          <button
+            data-testid="drawer-tab-certificates"
+            onClick={() => setDrawerTab("certificates")}
+            className={`px-4 py-2 text-sm font-medium ${
+              drawerTab === "certificates"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Certificates
+          </button>
+        </div>
 
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            {[
-              {
-                label: "Scheduled Start",
-                value: session.scheduled_start
-                  ? new Date(session.scheduled_start).toLocaleString()
-                  : "—",
-                testId: "drawer-scheduled-start",
-              },
-              {
-                label: "Scheduled End",
-                value: session.scheduled_end
-                  ? new Date(session.scheduled_end).toLocaleString()
-                  : "—",
-                testId: "drawer-scheduled-end",
-              },
-              {
-                label: "Actual Start",
-                value: session.actual_start
-                  ? new Date(session.actual_start).toLocaleString()
-                  : "—",
-                testId: "drawer-actual-start",
-              },
-              {
-                label: "Actual End",
-                value: session.actual_end
-                  ? new Date(session.actual_end).toLocaleString()
-                  : "—",
-                testId: "drawer-actual-end",
-              },
-              {
-                label: "Location",
-                value: session.location ?? "—",
-                testId: "drawer-location",
-              },
-              {
-                label: "Capacity",
-                value: session.capacity?.toString() ?? "—",
-                testId: "drawer-capacity",
-              },
-              {
-                label: "Expected",
-                value: session.expected_attendees?.toString() ?? "—",
-                testId: "drawer-expected-attendees",
-              },
-              {
-                label: "Actual",
-                value: session.actual_attendees?.toString() ?? "—",
-                testId: "drawer-actual-attendees",
-              },
-            ].map(({ label, value, testId }) => (
-              <div key={label}>
-                <p className="text-gray-400">{label}</p>
-                <p data-testid={testId} className="font-medium">
-                  {value}
-                </p>
+        {drawerTab === "overview" && (
+          <>
+            <div className="space-y-4 p-4">
+              <div className="flex items-center gap-2">
+                <SessionStatusBadge status={session.status} />
               </div>
-            ))}
-          </div>
 
-          {session.meeting_link && (
-            <div>
-              <p className="text-sm text-gray-400">Meeting Link</p>
-              <a
-                data-testid="drawer-meeting-link"
-                href={session.meeting_link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:underline"
-              >
-                {session.meeting_link}
-              </a>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                {[
+                  {
+                    label: "Scheduled Start",
+                    value: session.scheduled_start
+                      ? new Date(session.scheduled_start).toLocaleString()
+                      : "—",
+                    testId: "drawer-scheduled-start",
+                  },
+                  {
+                    label: "Scheduled End",
+                    value: session.scheduled_end
+                      ? new Date(session.scheduled_end).toLocaleString()
+                      : "—",
+                    testId: "drawer-scheduled-end",
+                  },
+                  {
+                    label: "Actual Start",
+                    value: session.actual_start
+                      ? new Date(session.actual_start).toLocaleString()
+                      : "—",
+                    testId: "drawer-actual-start",
+                  },
+                  {
+                    label: "Actual End",
+                    value: session.actual_end
+                      ? new Date(session.actual_end).toLocaleString()
+                      : "—",
+                    testId: "drawer-actual-end",
+                  },
+                  {
+                    label: "Location",
+                    value: session.location ?? "—",
+                    testId: "drawer-location",
+                  },
+                  {
+                    label: "Capacity",
+                    value: session.capacity?.toString() ?? "—",
+                    testId: "drawer-capacity",
+                  },
+                  {
+                    label: "Expected",
+                    value: session.expected_attendees?.toString() ?? "—",
+                    testId: "drawer-expected-attendees",
+                  },
+                  {
+                    label: "Actual",
+                    value: session.actual_attendees?.toString() ?? "—",
+                    testId: "drawer-actual-attendees",
+                  },
+                ].map(({ label, value, testId }) => (
+                  <div key={label}>
+                    <p className="text-gray-400">{label}</p>
+                    <p data-testid={testId} className="font-medium">
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {session.meeting_link && (
+                <div>
+                  <p className="text-sm text-gray-400">Meeting Link</p>
+                  <a
+                    data-testid="drawer-meeting-link"
+                    href={session.meeting_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-blue-600 hover:underline"
+                  >
+                    {session.meeting_link}
+                  </a>
+                </div>
+              )}
+
+              {session.notes && (
+                <div>
+                  <p className="text-sm text-gray-400">Notes</p>
+                  <p data-testid="drawer-notes" className="text-sm">
+                    {session.notes}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
 
-          {session.notes && (
-            <div>
-              <p className="text-sm text-gray-400">Notes</p>
-              <p data-testid="drawer-notes" className="text-sm">
-                {session.notes}
+            <div className="border-t p-4">
+              <p className="mb-3 text-xs font-medium uppercase text-gray-400">
+                Actions
               </p>
+              <div className="flex flex-wrap gap-2">
+                {canStart && (
+                  <button
+                    data-testid="btn-start-session"
+                    disabled={start.isPending}
+                    onClick={() =>
+                      start.mutate({
+                        id: session.id,
+                        engagementId: session.engagement_id,
+                      })
+                    }
+                    className="rounded bg-yellow-500 px-3 py-1.5 text-sm text-white hover:bg-yellow-600 disabled:opacity-50"
+                  >
+                    Start
+                  </button>
+                )}
+                {canComplete && (
+                  <button
+                    data-testid="btn-complete-session"
+                    onClick={() => setModal({ type: "complete" })}
+                    className="rounded bg-green-600 px-3 py-1.5 text-sm text-white hover:bg-green-700"
+                  >
+                    Complete
+                  </button>
+                )}
+                {canCancel && (
+                  <button
+                    data-testid="btn-cancel-session"
+                    onClick={() => setModal({ type: "cancel" })}
+                    className="rounded bg-red-500 px-3 py-1.5 text-sm text-white hover:bg-red-600"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  data-testid="btn-assign-trainer"
+                  onClick={() => setModal({ type: "assign_trainer" })}
+                  className="rounded border px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Assign Trainer
+                </button>
+              </div>
             </div>
-          )}
-        </div>
+          </>
+        )}
 
-        <div className="border-t p-4">
-          <p className="mb-3 text-xs font-medium uppercase text-gray-400">
-            Actions
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {canStart && (
-              <button
-                data-testid="btn-start-session"
-                disabled={start.isPending}
-                onClick={() =>
-                  start.mutate({
-                    id: session.id,
-                    engagementId: session.engagement_id,
-                  })
-                }
-                className="rounded bg-yellow-500 px-3 py-1.5 text-sm text-white hover:bg-yellow-600 disabled:opacity-50"
-              >
-                Start
-              </button>
-            )}
-            {canComplete && (
-              <button
-                data-testid="btn-complete-session"
-                onClick={() => setModal({ type: "complete" })}
-                className="rounded bg-green-600 px-3 py-1.5 text-sm text-white hover:bg-green-700"
-              >
-                Complete
-              </button>
-            )}
-            {canCancel && (
-              <button
-                data-testid="btn-cancel-session"
-                onClick={() => setModal({ type: "cancel" })}
-                className="rounded bg-red-500 px-3 py-1.5 text-sm text-white hover:bg-red-600"
-              >
-                Cancel
-              </button>
-            )}
-            <button
-              data-testid="btn-assign-trainer"
-              onClick={() => setModal({ type: "assign_trainer" })}
-              className="rounded border px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              Assign Trainer
-            </button>
+        {drawerTab === "certificates" && (
+          <div className="p-4">
+            <CertificateCenter
+              sessionId={session.id}
+              workspaceId={workspaceId}
+            />
           </div>
-        </div>
+        )}
       </div>
 
       {modal?.type === "complete" && (

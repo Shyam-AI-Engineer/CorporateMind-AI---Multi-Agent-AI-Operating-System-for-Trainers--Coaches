@@ -1,4 +1,4 @@
-"""Training Engagement, Session, and Attendance ORM models — Sprint 42/43/44."""
+"""Training Engagement, Session, Attendance, and Certificate ORM models — Sprint 42–45."""
 
 from __future__ import annotations
 
@@ -124,6 +124,37 @@ class TrainingAttendance(TenantBase):
         Boolean, nullable=False, default=False
     )
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TrainingCertificate(TenantBase):
+    __tablename__ = "training_certificates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), nullable=False, index=True
+    )
+    attendance_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), nullable=False, index=True
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), nullable=False, index=True
+    )
+
+    certificate_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    participant_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    participant_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    certificate_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    issue_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    issued_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    download_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    verification_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

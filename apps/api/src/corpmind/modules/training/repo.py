@@ -1,4 +1,4 @@
-"""Training Engagement, Session, and Attendance repositories — Sprint 42/43/44."""
+"""Training Engagement, Session, Attendance, and Certificate repositories — Sprint 42–45."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from corpmind.modules.training.models import (
     TrainingAttendance,
+    TrainingCertificate,
     TrainingEngagement,
     TrainingSession,
 )
@@ -378,6 +379,112 @@ class TrainingAttendanceRepo:
                     func.lower(TrainingAttendance.participant_name).like(term),
                     func.lower(TrainingAttendance.participant_email).like(term),
                     func.lower(TrainingAttendance.company).like(term),
+                )
+            )
+        return q
+
+
+class TrainingCertificateRepo:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, cert: TrainingCertificate) -> TrainingCertificate:
+        self._session.add(cert)
+        return cert
+
+    async def find_by_id(self, cert_id: uuid.UUID) -> Optional[TrainingCertificate]:
+        result = await self._session.execute(
+            select(TrainingCertificate).where(TrainingCertificate.id == cert_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def find_by_verification_code(
+        self, code: str
+    ) -> Optional[TrainingCertificate]:
+        result = await self._session.execute(
+            select(TrainingCertificate).where(
+                TrainingCertificate.verification_code == code
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def update_fields(self, cert_id: uuid.UUID, **values: Any) -> None:
+        obj = await self.find_by_id(cert_id)
+        if obj:
+            for key, value in values.items():
+                setattr(obj, key, value)
+
+    async def count(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        session_id: Optional[uuid.UUID] = None,
+        status: Optional[str] = None,
+        issued_by: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        q = select(func.count()).select_from(TrainingCertificate).where(
+            TrainingCertificate.workspace_id == workspace_id
+        )
+        q = self._apply_cert_filters(q, session_id, status, issued_by, search)
+        result = await self._session.execute(q)
+        return result.scalar_one()
+
+    async def list_page(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        session_id: Optional[uuid.UUID] = None,
+        status: Optional[str] = None,
+        issued_by: Optional[str] = None,
+        search: Optional[str] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[TrainingCertificate]:
+        q = select(TrainingCertificate).where(
+            TrainingCertificate.workspace_id == workspace_id
+        )
+        q = self._apply_cert_filters(q, session_id, status, issued_by, search)
+        if cursor:
+            cursor_ts, cursor_id = decode_cursor(cursor)
+            q = q.where(
+                (TrainingCertificate.created_at < cursor_ts)
+                | (
+                    (TrainingCertificate.created_at == cursor_ts)
+                    & (TrainingCertificate.id < cursor_id)
+                )
+            )
+        q = q.order_by(
+            TrainingCertificate.created_at.desc(), TrainingCertificate.id.desc()
+        ).limit(limit)
+        result = await self._session.execute(q)
+        return list(result.scalars().all())
+
+    def _apply_cert_filters(
+        self,
+        q: Any,
+        session_id: Optional[uuid.UUID],
+        status: Optional[str],
+        issued_by: Optional[str],
+        search: Optional[str],
+    ) -> Any:
+        if session_id:
+            q = q.where(TrainingCertificate.session_id == session_id)
+        if status:
+            q = q.where(TrainingCertificate.status == status)
+        if issued_by:
+            q = q.where(
+                func.lower(TrainingCertificate.issued_by).like(
+                    f"%{issued_by.lower()}%"
+                )
+            )
+        if search:
+            term = f"%{search.lower()}%"
+            q = q.where(
+                or_(
+                    func.lower(TrainingCertificate.participant_name).like(term),
+                    func.lower(TrainingCertificate.participant_email).like(term),
+                    func.lower(TrainingCertificate.certificate_number).like(term),
                 )
             )
         return q

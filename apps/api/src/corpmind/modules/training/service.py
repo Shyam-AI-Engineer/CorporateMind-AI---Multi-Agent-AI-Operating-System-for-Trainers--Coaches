@@ -1,7 +1,8 @@
-"""TrainingEngagementService, TrainingSessionService, TrainingAttendanceService — Sprint 42/43/44."""
+"""Training services: Engagement, Session, Attendance, Certificate — Sprint 42–45."""
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import UTC, datetime
 
@@ -11,9 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from corpmind.core.exceptions import NotFoundError, ValidationError
 from corpmind.core.redis import get_redis
 from corpmind.core.tenancy import get_tenant_context
-from corpmind.modules.training.models import TrainingAttendance, TrainingEngagement, TrainingSession
+from corpmind.modules.training.models import (
+    TrainingAttendance,
+    TrainingCertificate,
+    TrainingEngagement,
+    TrainingSession,
+)
 from corpmind.modules.training.repo import (
     TrainingAttendanceRepo,
+    TrainingCertificateRepo,
     TrainingEngagementRepo,
     TrainingSessionRepo,
     encode_cursor,
@@ -24,11 +31,18 @@ from corpmind.modules.training.schemas import (
     CheckOutAttendance,
     CompleteEngagement,
     CompleteSession,
+    IssueCertificate,
+    RevokeCertificate,
     TrainingAttendanceCreate,
     TrainingAttendanceFilters,
     TrainingAttendanceListOut,
     TrainingAttendanceOut,
     TrainingAttendanceUpdate,
+    TrainingCertificateCreate,
+    TrainingCertificateFilters,
+    TrainingCertificateListOut,
+    TrainingCertificateOut,
+    TrainingCertificateUpdate,
     TrainingEngagementCreate,
     TrainingEngagementFilters,
     TrainingEngagementListOut,
@@ -821,5 +835,252 @@ class TrainingAttendanceService:
         try:
             redis = get_redis()
             await redis.delete(_attendance_detail_key(org_id, attendance_id))
+        except Exception:
+            pass
+
+
+# ── Certificate cache keys ────────────────────────────────────────────────────
+
+def _cert_list_key(org_id: uuid.UUID, session_id: uuid.UUID) -> str:
+    return f"t:{org_id}:training:certificates:list:{session_id}"
+
+
+def _cert_detail_key(org_id: uuid.UUID, cert_id: uuid.UUID) -> str:
+    return f"t:{org_id}:training:certificates:detail:{cert_id}"
+
+
+class TrainingCertificateService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._repo = TrainingCertificateRepo(session)
+        self._attendance_repo = TrainingAttendanceRepo(session)
+
+    async def create_certificate(
+        self, req: TrainingCertificateCreate
+    ) -> TrainingCertificateOut:
+        ctx = get_tenant_context()
+
+        attendance = await self._attendance_repo.find_by_id(req.attendance_id)
+        if not attendance:
+            raise NotFoundError(f"Attendance record {req.attendance_id} not found")
+        if not attendance.certificate_eligible:
+            raise ValidationError(
+                "attendance record is not marked certificate_eligible"
+            )
+
+        now = datetime.now(UTC)
+        verification_code = secrets.token_urlsafe(12)
+        cert = TrainingCertificate(
+            id=uuid.uuid4(),
+            tenant_id=ctx.org_id,
+            workspace_id=req.workspace_id,
+            attendance_id=req.attendance_id,
+            session_id=req.session_id,
+            participant_name=attendance.participant_name,
+            participant_email=attendance.participant_email,
+            certificate_title=req.certificate_title,
+            status="draft",
+            download_count=0,
+            verification_code=verification_code,
+            notes=req.notes,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._repo.create(cert)
+        await self._session.commit()
+        await self._bust_cert_list_cache(ctx.org_id, req.session_id)
+
+        log.info(
+            "certificate.created",
+            certificate_id=str(cert.id),
+            attendance_id=str(req.attendance_id),
+            tenant_id=str(ctx.org_id),
+        )
+        return TrainingCertificateOut.model_validate(cert)
+
+    async def get_certificate(self, cert_id: uuid.UUID) -> TrainingCertificateOut:
+        ctx = get_tenant_context()
+        redis = get_redis()
+        key = _cert_detail_key(ctx.org_id, cert_id)
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return TrainingCertificateOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        cert = await self._repo.find_by_id(cert_id)
+        if not cert:
+            raise NotFoundError(f"Certificate {cert_id} not found")
+
+        out = TrainingCertificateOut.model_validate(cert)
+        try:
+            await redis.set(key, out.model_dump_json(), ex=_DETAIL_TTL)
+        except Exception:
+            pass
+        return out
+
+    async def update_certificate(
+        self, cert_id: uuid.UUID, req: TrainingCertificateUpdate
+    ) -> TrainingCertificateOut:
+        ctx = get_tenant_context()
+        cert = await self._repo.find_by_id(cert_id)
+        if not cert:
+            raise NotFoundError(f"Certificate {cert_id} not found")
+        if cert.status != "draft":
+            raise ValidationError("only draft certificates can be updated")
+
+        fields: dict = {"updated_at": datetime.now(UTC)}
+        for field_name, value in req.model_dump(exclude_none=True).items():
+            fields[field_name] = value
+        await self._repo.update_fields(cert_id, **fields)
+        await self._session.commit()
+        await self._bust_cert_detail_cache(ctx.org_id, cert_id)
+        await self._bust_cert_list_cache(ctx.org_id, cert.session_id)
+        return await self.get_certificate(cert_id)
+
+    async def issue_certificate(
+        self, cert_id: uuid.UUID, req: IssueCertificate
+    ) -> TrainingCertificateOut:
+        ctx = get_tenant_context()
+        cert = await self._repo.find_by_id(cert_id)
+        if not cert:
+            raise NotFoundError(f"Certificate {cert_id} not found")
+        if cert.status != "draft":
+            raise ValidationError("only draft certificates can be issued")
+
+        fields: dict = {"status": "issued", "updated_at": datetime.now(UTC)}
+        if req.issue_date is not None:
+            fields["issue_date"] = req.issue_date
+        if req.issued_by is not None:
+            fields["issued_by"] = req.issued_by
+        if req.certificate_number is not None:
+            fields["certificate_number"] = req.certificate_number
+        if req.certificate_title is not None:
+            fields["certificate_title"] = req.certificate_title
+
+        await self._repo.update_fields(cert_id, **fields)
+        await self._session.commit()
+        await self._bust_cert_detail_cache(ctx.org_id, cert_id)
+        await self._bust_cert_list_cache(ctx.org_id, cert.session_id)
+
+        log.info(
+            "certificate.issued",
+            certificate_id=str(cert_id),
+            tenant_id=str(ctx.org_id),
+        )
+        return await self.get_certificate(cert_id)
+
+    async def revoke_certificate(
+        self, cert_id: uuid.UUID, req: RevokeCertificate
+    ) -> TrainingCertificateOut:
+        ctx = get_tenant_context()
+        cert = await self._repo.find_by_id(cert_id)
+        if not cert:
+            raise NotFoundError(f"Certificate {cert_id} not found")
+        if cert.status == "revoked":
+            raise ValidationError("certificate is already revoked")
+
+        fields: dict = {"status": "revoked", "updated_at": datetime.now(UTC)}
+        if req.notes is not None:
+            fields["notes"] = req.notes
+
+        await self._repo.update_fields(cert_id, **fields)
+        await self._session.commit()
+        await self._bust_cert_detail_cache(ctx.org_id, cert_id)
+        await self._bust_cert_list_cache(ctx.org_id, cert.session_id)
+
+        log.info(
+            "certificate.revoked",
+            certificate_id=str(cert_id),
+            tenant_id=str(ctx.org_id),
+        )
+        return await self.get_certificate(cert_id)
+
+    async def list_certificates(
+        self, filters: TrainingCertificateFilters
+    ) -> TrainingCertificateListOut:
+        ctx = get_tenant_context()
+        is_session_only = (
+            filters.session_id is not None
+            and filters.status is None
+            and filters.issued_by is None
+            and filters.search is None
+            and filters.cursor is None
+            and filters.limit == 50
+        )
+
+        if is_session_only:
+            redis = get_redis()
+            key = _cert_list_key(ctx.org_id, filters.session_id)  # type: ignore[arg-type]
+            try:
+                cached = await redis.get(key)
+                if cached:
+                    return TrainingCertificateListOut.model_validate_json(cached)
+            except Exception:
+                pass
+
+        total = await self._repo.count(
+            filters.workspace_id,
+            session_id=filters.session_id,
+            status=filters.status,
+            issued_by=filters.issued_by,
+            search=filters.search,
+        )
+        rows = await self._repo.list_page(
+            filters.workspace_id,
+            session_id=filters.session_id,
+            status=filters.status,
+            issued_by=filters.issued_by,
+            search=filters.search,
+            cursor=filters.cursor,
+            limit=filters.limit,
+        )
+
+        next_cursor = None
+        if len(rows) == filters.limit:
+            last = rows[-1]
+            next_cursor = encode_cursor(last.created_at, last.id)
+
+        out = TrainingCertificateListOut(
+            items=[TrainingCertificateOut.model_validate(r) for r in rows],
+            next_cursor=next_cursor,
+            has_more=next_cursor is not None,
+            total=total,
+        )
+
+        if is_session_only and filters.session_id:
+            redis = get_redis()
+            try:
+                await redis.set(
+                    _cert_list_key(ctx.org_id, filters.session_id),
+                    out.model_dump_json(),
+                    ex=_LIST_TTL,
+                )
+            except Exception:
+                pass
+        return out
+
+    async def verify_certificate(self, verification_code: str) -> TrainingCertificateOut:
+        cert = await self._repo.find_by_verification_code(verification_code)
+        if not cert:
+            raise NotFoundError(f"Certificate with code {verification_code!r} not found")
+        return TrainingCertificateOut.model_validate(cert)
+
+    async def _bust_cert_list_cache(
+        self, org_id: uuid.UUID, session_id: uuid.UUID
+    ) -> None:
+        try:
+            redis = get_redis()
+            await redis.delete(_cert_list_key(org_id, session_id))
+        except Exception:
+            pass
+
+    async def _bust_cert_detail_cache(
+        self, org_id: uuid.UUID, cert_id: uuid.UUID
+    ) -> None:
+        try:
+            redis = get_redis()
+            await redis.delete(_cert_detail_key(org_id, cert_id))
         except Exception:
             pass

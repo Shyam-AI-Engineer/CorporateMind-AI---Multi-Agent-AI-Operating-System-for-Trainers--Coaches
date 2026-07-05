@@ -9,6 +9,8 @@ import type {
   CompleteEngagement,
   CompleteSession,
   CoordinatorAssign,
+  IssueCertificate,
+  RevokeCertificate,
   SessionTrainerAssign,
   TrainerAssign,
   TrainingAttendance,
@@ -16,6 +18,11 @@ import type {
   TrainingAttendanceFilters,
   TrainingAttendanceListOut,
   TrainingAttendanceUpdate,
+  TrainingCertificate,
+  TrainingCertificateCreate,
+  TrainingCertificateFilters,
+  TrainingCertificateListOut,
+  TrainingCertificateUpdate,
   TrainingEngagement,
   TrainingEngagementCreate,
   TrainingEngagementFilters,
@@ -532,6 +539,136 @@ export function useCheckOut(workspaceId: string | null | undefined) {
     mutationFn: ({ id, body }) =>
       api.post<{ data: TrainingAttendance }>(
         `/api/v1/training-attendance/${id}/check-out`,
+        body,
+      ),
+    onSuccess: (_, { id, sessionId }) => invalidate(id, sessionId),
+  });
+}
+
+// ── Certificate hooks ──────────────────────────────────────────────────────────
+
+const CERT_LIST_KEY = (
+  workspaceId: string,
+  filters?: Partial<TrainingCertificateFilters>,
+) => ["training", "certificates", "list", workspaceId, filters ?? {}] as const;
+
+const CERT_DETAIL_KEY = (id: string) =>
+  ["training", "certificates", "detail", id] as const;
+
+function useInvalidateCertificates(workspaceId: string | null | undefined) {
+  const qc = useQueryClient();
+  return (certId?: string, sessionId?: string) => {
+    if (workspaceId) {
+      void qc.invalidateQueries({
+        queryKey: ["training", "certificates", "list", workspaceId],
+      });
+    }
+    if (certId) {
+      void qc.invalidateQueries({ queryKey: CERT_DETAIL_KEY(certId) });
+    }
+    if (sessionId) {
+      void qc.invalidateQueries({
+        queryKey: ["training", "certificates", "list"],
+      });
+    }
+  };
+}
+
+export function useCertificateList(
+  filters: TrainingCertificateFilters | null | undefined,
+) {
+  const workspaceId = filters?.workspace_id ?? "";
+  return useQuery<{ data: TrainingCertificateListOut }>({
+    queryKey: CERT_LIST_KEY(workspaceId, filters ?? {}),
+    queryFn: () => {
+      if (!workspaceId) throw new Error("workspace_id required");
+      const params = new URLSearchParams({ workspace_id: workspaceId });
+      if (filters?.session_id) params.set("session_id", filters.session_id);
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.issued_by) params.set("issued_by", filters.issued_by);
+      if (filters?.search) params.set("search", filters.search);
+      if (filters?.cursor) params.set("cursor", filters.cursor);
+      if (filters?.limit) params.set("limit", String(filters.limit));
+      return api.get<{ data: TrainingCertificateListOut }>(
+        `/api/v1/training-certificates?${params}`,
+      );
+    },
+    staleTime: STALE_MS,
+    enabled: !!workspaceId,
+  });
+}
+
+export function useCertificate(certId: string | null | undefined) {
+  return useQuery<{ data: TrainingCertificate }>({
+    queryKey: CERT_DETAIL_KEY(certId ?? ""),
+    queryFn: () =>
+      api.get<{ data: TrainingCertificate }>(
+        `/api/v1/training-certificates/${certId}`,
+      ),
+    staleTime: STALE_MS,
+    enabled: !!certId,
+  });
+}
+
+export function useCreateCertificate(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateCertificates(workspaceId);
+  return useMutation<
+    { data: TrainingCertificate },
+    Error,
+    TrainingCertificateCreate
+  >({
+    mutationFn: (body) =>
+      api.post<{ data: TrainingCertificate }>(
+        "/api/v1/training-certificates/",
+        body,
+      ),
+    onSuccess: (data) =>
+      invalidate(data.data.id, data.data.session_id),
+  });
+}
+
+export function useUpdateCertificate(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateCertificates(workspaceId);
+  return useMutation<
+    { data: TrainingCertificate },
+    Error,
+    { id: string; sessionId: string; body: TrainingCertificateUpdate }
+  >({
+    mutationFn: ({ id, body }) =>
+      api.patch<{ data: TrainingCertificate }>(
+        `/api/v1/training-certificates/${id}`,
+        body,
+      ),
+    onSuccess: (_, { id, sessionId }) => invalidate(id, sessionId),
+  });
+}
+
+export function useIssueCertificate(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateCertificates(workspaceId);
+  return useMutation<
+    { data: TrainingCertificate },
+    Error,
+    { id: string; sessionId: string; body: IssueCertificate }
+  >({
+    mutationFn: ({ id, body }) =>
+      api.post<{ data: TrainingCertificate }>(
+        `/api/v1/training-certificates/${id}/issue`,
+        body,
+      ),
+    onSuccess: (_, { id, sessionId }) => invalidate(id, sessionId),
+  });
+}
+
+export function useRevokeCertificate(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateCertificates(workspaceId);
+  return useMutation<
+    { data: TrainingCertificate },
+    Error,
+    { id: string; sessionId: string; body: RevokeCertificate }
+  >({
+    mutationFn: ({ id, body }) =>
+      api.post<{ data: TrainingCertificate }>(
+        `/api/v1/training-certificates/${id}/revoke`,
         body,
       ),
     onSuccess: (_, { id, sessionId }) => invalidate(id, sessionId),

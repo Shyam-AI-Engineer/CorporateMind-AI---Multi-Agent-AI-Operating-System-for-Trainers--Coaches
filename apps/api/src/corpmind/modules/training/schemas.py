@@ -1,4 +1,4 @@
-"""Training Engagement and Session Pydantic v2 schemas — Sprint 42 / Sprint 43."""
+"""Training Engagement, Session, Attendance, and Certificate Pydantic v2 schemas — Sprint 42–45."""
 
 from __future__ import annotations
 
@@ -405,6 +405,85 @@ class TrainingAttendanceFilters(BaseModel):
     session_id: Optional[uuid.UUID] = None
     attendance_status: Optional[str] = None
     company: Optional[str] = None
+    search: Optional[str] = None
+    cursor: Optional[str] = None
+    limit: int = 50
+
+
+# ── Certificate schemas ───────────────────────────────────────────────────────
+
+VALID_CERTIFICATE_STATUSES: set[str] = {"draft", "issued", "revoked"}
+
+
+class TrainingCertificateOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    workspace_id: uuid.UUID
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    certificate_number: Optional[str]
+    participant_name: str
+    participant_email: Optional[str]
+    certificate_title: Optional[str]
+    issue_date: Optional[date]
+    issued_by: Optional[str]
+    status: str
+    download_count: int
+    verification_code: Optional[str]
+    notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class TrainingCertificateCreate(BaseModel):
+    workspace_id: uuid.UUID
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    certificate_title: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TrainingCertificateUpdate(BaseModel):
+    participant_name: Optional[str] = None
+    participant_email: Optional[str] = None
+    certificate_title: Optional[str] = None
+    certificate_number: Optional[str] = None
+    issued_by: Optional[str] = None
+    notes: Optional[str] = None
+
+    @field_validator("participant_name")
+    @classmethod
+    def participant_name_not_empty(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("participant_name must not be empty")
+        return v
+
+
+class IssueCertificate(BaseModel):
+    issue_date: Optional[date] = None
+    issued_by: Optional[str] = None
+    certificate_number: Optional[str] = None
+    certificate_title: Optional[str] = None
+
+
+class RevokeCertificate(BaseModel):
+    notes: Optional[str] = None
+
+
+class TrainingCertificateListOut(BaseModel):
+    items: list[TrainingCertificateOut]
+    next_cursor: Optional[str]
+    has_more: bool
+    total: int
+
+
+class TrainingCertificateFilters(BaseModel):
+    workspace_id: uuid.UUID
+    session_id: Optional[uuid.UUID] = None
+    status: Optional[str] = None
+    issued_by: Optional[str] = None
     search: Optional[str] = None
     cursor: Optional[str] = None
     limit: int = 50

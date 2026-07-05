@@ -310,3 +310,78 @@ export interface TrainingAttendanceFilters {
   cursor?: string;
   limit?: number;
 }
+
+// ── Certificate types ──────────────────────────────────────────────────────────
+
+export type CertificateStatus = "draft" | "issued" | "revoked";
+
+export const CERTIFICATE_STATUSES: CertificateStatus[] = [
+  "draft",
+  "issued",
+  "revoked",
+];
+
+export interface TrainingCertificate {
+  id: string;
+  tenant_id: string;
+  workspace_id: string;
+  attendance_id: string;
+  session_id: string;
+  certificate_number: string | null;
+  participant_name: string;
+  participant_email: string | null;
+  certificate_title: string | null;
+  issue_date: string | null;
+  issued_by: string | null;
+  status: CertificateStatus;
+  download_count: number;
+  verification_code: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrainingCertificateListOut {
+  items: TrainingCertificate[];
+  next_cursor: string | null;
+  has_more: boolean;
+  total: number;
+}
+
+export interface TrainingCertificateCreate {
+  workspace_id: string;
+  attendance_id: string;
+  session_id: string;
+  certificate_title?: string;
+  notes?: string;
+}
+
+export interface TrainingCertificateUpdate {
+  participant_name?: string;
+  participant_email?: string;
+  certificate_title?: string;
+  certificate_number?: string;
+  issued_by?: string;
+  notes?: string;
+}
+
+export interface IssueCertificate {
+  issue_date?: string;
+  issued_by?: string;
+  certificate_number?: string;
+  certificate_title?: string;
+}
+
+export interface RevokeCertificate {
+  notes?: string;
+}
+
+export interface TrainingCertificateFilters {
+  workspace_id: string;
+  session_id?: string;
+  status?: CertificateStatus;
+  issued_by?: string;
+  search?: string;
+  cursor?: string;
+  limit?: number;
+}
