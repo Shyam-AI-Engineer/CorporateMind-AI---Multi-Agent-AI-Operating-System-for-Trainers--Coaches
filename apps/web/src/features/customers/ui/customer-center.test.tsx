@@ -18,6 +18,17 @@ vi.mock("@/features/training/api/use-training", () => ({
   useCustomerFeedback: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
 }));
 
+vi.mock("@/features/customers/api/use-customer-success", () => ({
+  useCustomerSuccessByCustomer: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+  useCustomerSuccessList: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+  useCreateCustomerSuccess: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useUpdateCustomerSuccess: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useAssignSuccessOwner: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useUpdateSuccessHealth: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useScheduleFollowup: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useArchiveCustomerSuccess: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+}));
+
 import {
   useCustomers,
   useCreateCustomer,

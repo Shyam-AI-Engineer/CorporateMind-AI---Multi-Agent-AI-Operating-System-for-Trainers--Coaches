@@ -21,6 +21,7 @@ import {
   CUSTOMER_STATUSES,
 } from "@/features/customers/types";
 import { useCustomerFeedback } from "@/features/training/api/use-training";
+import { HealthBadge, RiskBadge, CustomerSuccessSummary } from "@/features/customers/ui/customer-success-center";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -288,6 +289,9 @@ function DetailDrawer({
         </div>
       </div>
 
+      {/* Customer Success summary */}
+      <CustomerSuccessSummary customerId={customer.id} />
+
       {/* Feedback history */}
       <CustomerFeedbackHistory customerId={customer.id} workspaceId={workspaceId} />
 
@@ -303,6 +307,8 @@ function DetailDrawer({
     </div>
   );
 }
+
+// ── Customer success summary (read-only) ──────────────────────────────────────
 
 // ── Customer feedback history (read-only) ─────────────────────────────────────
 
