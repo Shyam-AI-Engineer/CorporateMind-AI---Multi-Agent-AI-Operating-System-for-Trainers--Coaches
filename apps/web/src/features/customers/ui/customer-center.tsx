@@ -22,6 +22,9 @@ import {
 } from "@/features/customers/types";
 import { useCustomerFeedback } from "@/features/training/api/use-training";
 import { HealthBadge, RiskBadge, CustomerSuccessSummary } from "@/features/customers/ui/customer-success-center";
+import { RenewalTable, RenewalDialog } from "@/features/customers/ui/renewal-center";
+import { useRenewalsByCustomer, useCreateCustomerRenewal } from "@/features/customers/api/use-renewal";
+import type { CustomerRenewal } from "@/features/customers/types-renewal";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -217,6 +220,61 @@ interface DetailDrawerProps {
   onHealthChange: (id: string, h: CustomerHealthStatus) => void;
 }
 
+function CustomerRenewalsTab({
+  customerId,
+  workspaceId,
+}: {
+  customerId: string;
+  workspaceId: string;
+}) {
+  const { data, isLoading } = useRenewalsByCustomer(customerId, workspaceId);
+  const createMut = useCreateCustomerRenewal(workspaceId);
+  const [showCreate, setShowCreate] = useState(false);
+  const [selected, setSelected] = useState<CustomerRenewal | null>(null);
+  const items = data?.data?.items ?? [];
+
+  return (
+    <div data-testid="customer-renewals-tab" className="mt-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Renewals
+        </p>
+        <button
+          data-testid="add-renewal-from-drawer"
+          onClick={() => setShowCreate(true)}
+          className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+        >
+          New
+        </button>
+      </div>
+      {isLoading && (
+        <p data-testid="renewals-tab-loading" className="text-xs text-muted-foreground">
+          Loading…
+        </p>
+      )}
+      {!isLoading && items.length === 0 && (
+        <p data-testid="renewals-tab-empty" className="text-xs text-muted-foreground">
+          No renewals yet.
+        </p>
+      )}
+      {!isLoading && items.length > 0 && (
+        <RenewalTable records={items} onSelect={setSelected} />
+      )}
+      {showCreate && (
+        <RenewalDialog
+          workspaceId={workspaceId}
+          customerId={customerId}
+          onClose={() => setShowCreate(false)}
+          onCreate={(req) =>
+            createMut.mutate(req, { onSuccess: () => setShowCreate(false) })
+          }
+          isPending={createMut.isPending}
+        />
+      )}
+    </div>
+  );
+}
+
 function DetailDrawer({
   customer,
   workspaceId,
@@ -224,6 +282,7 @@ function DetailDrawer({
   onArchive,
   onHealthChange,
 }: DetailDrawerProps) {
+  const [activeTab, setActiveTab] = useState<"overview" | "renewals">("overview");
   return (
     <div
       data-testid="detail-drawer"
@@ -238,72 +297,98 @@ function DetailDrawer({
         </button>
       </div>
 
-      <div className="space-y-3 text-sm">
-        <div>
-          <span className="text-muted-foreground">Status: </span>
-          <CustomerStatusBadge status={customer.status} />
-        </div>
-        <div>
-          <span className="text-muted-foreground">Health: </span>
-          <CustomerHealthBadge health={customer.health_status} />
-        </div>
-        {customer.industry && (
-          <div>
-            <span className="text-muted-foreground">Industry: </span>
-            <span data-testid="drawer-industry">{customer.industry}</span>
-          </div>
-        )}
-        {customer.email && (
-          <div>
-            <span className="text-muted-foreground">Email: </span>
-            <span data-testid="drawer-email">{customer.email}</span>
-          </div>
-        )}
-        {customer.website && (
-          <div>
-            <span className="text-muted-foreground">Website: </span>
-            <span data-testid="drawer-website">{customer.website}</span>
-          </div>
-        )}
-        {customer.notes && (
-          <div>
-            <span className="text-muted-foreground">Notes: </span>
-            <span data-testid="drawer-notes">{customer.notes}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="mt-6 space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Change health</p>
-        <div className="flex flex-wrap gap-2">
-          {CUSTOMER_HEALTH_STATUSES.map((h) => (
-            <button
-              key={h}
-              onClick={() => onHealthChange(customer.id, h)}
-              data-testid={`health-btn-${h}`}
-              className="rounded border px-2 py-1 text-xs hover:bg-muted"
-            >
-              {h.replace("_", " ")}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Customer Success summary */}
-      <CustomerSuccessSummary customerId={customer.id} />
-
-      {/* Feedback history */}
-      <CustomerFeedbackHistory customerId={customer.id} workspaceId={workspaceId} />
-
-      <div className="mt-6">
+      {/* Tabs */}
+      <div className="flex border-b mb-4" data-testid="drawer-tabs">
         <button
-          onClick={() => onArchive(customer.id)}
-          data-testid="archive-btn"
-          className="w-full rounded border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+          data-testid="tab-overview"
+          onClick={() => setActiveTab("overview")}
+          className={`px-4 py-2 text-sm ${activeTab === "overview" ? "border-b-2 border-blue-600 font-medium" : "text-muted-foreground"}`}
         >
-          Archive customer
+          Overview
+        </button>
+        <button
+          data-testid="tab-renewals"
+          onClick={() => setActiveTab("renewals")}
+          className={`px-4 py-2 text-sm ${activeTab === "renewals" ? "border-b-2 border-blue-600 font-medium" : "text-muted-foreground"}`}
+        >
+          Renewals
         </button>
       </div>
+
+      {activeTab === "renewals" && (
+        <CustomerRenewalsTab customerId={customer.id} workspaceId={workspaceId} />
+      )}
+
+      {activeTab === "overview" && (
+        <>
+          <div className="space-y-3 text-sm">
+            <div>
+              <span className="text-muted-foreground">Status: </span>
+              <CustomerStatusBadge status={customer.status} />
+            </div>
+            <div>
+              <span className="text-muted-foreground">Health: </span>
+              <CustomerHealthBadge health={customer.health_status} />
+            </div>
+            {customer.industry && (
+              <div>
+                <span className="text-muted-foreground">Industry: </span>
+                <span data-testid="drawer-industry">{customer.industry}</span>
+              </div>
+            )}
+            {customer.email && (
+              <div>
+                <span className="text-muted-foreground">Email: </span>
+                <span data-testid="drawer-email">{customer.email}</span>
+              </div>
+            )}
+            {customer.website && (
+              <div>
+                <span className="text-muted-foreground">Website: </span>
+                <span data-testid="drawer-website">{customer.website}</span>
+              </div>
+            )}
+            {customer.notes && (
+              <div>
+                <span className="text-muted-foreground">Notes: </span>
+                <span data-testid="drawer-notes">{customer.notes}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-6 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Change health</p>
+            <div className="flex flex-wrap gap-2">
+              {CUSTOMER_HEALTH_STATUSES.map((h) => (
+                <button
+                  key={h}
+                  onClick={() => onHealthChange(customer.id, h)}
+                  data-testid={`health-btn-${h}`}
+                  className="rounded border px-2 py-1 text-xs hover:bg-muted"
+                >
+                  {h.replace("_", " ")}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Customer Success summary */}
+          <CustomerSuccessSummary customerId={customer.id} />
+
+          {/* Feedback history */}
+          <CustomerFeedbackHistory customerId={customer.id} workspaceId={workspaceId} />
+
+          <div className="mt-6">
+            <button
+              onClick={() => onArchive(customer.id)}
+              data-testid="archive-btn"
+              className="w-full rounded border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+            >
+              Archive customer
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

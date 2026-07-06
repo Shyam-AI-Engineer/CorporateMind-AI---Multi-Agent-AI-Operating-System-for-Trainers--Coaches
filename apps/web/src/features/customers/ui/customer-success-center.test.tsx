@@ -5,6 +5,18 @@ import type { CustomerSuccess, CustomerSuccessListOut } from "@/features/custome
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
+vi.mock("@/features/customers/api/use-renewal", () => ({
+  useCustomerRenewalList: vi.fn(),
+  useCustomerRenewalDetail: vi.fn(),
+  useRenewalsByCustomer: vi.fn(),
+  useCreateCustomerRenewal: vi.fn(),
+  useUpdateCustomerRenewal: vi.fn(),
+  useAssignRenewalOwner: vi.fn(),
+  useUpdateRenewalStatus: vi.fn(),
+  useAttachProposal: vi.fn(),
+  useArchiveCustomerRenewal: vi.fn(),
+}));
+
 vi.mock("@/features/customers/api/use-customer-success", () => ({
   useCustomerSuccessList: vi.fn(),
   useCustomerSuccessDetail: vi.fn(),
@@ -29,6 +41,8 @@ import {
   useArchiveCustomerSuccess,
 } from "@/features/customers/api/use-customer-success";
 
+import { useRenewalsByCustomer } from "@/features/customers/api/use-renewal";
+
 const mockList = vi.mocked(useCustomerSuccessList);
 const mockDetail = vi.mocked(useCustomerSuccessDetail);
 const mockByCustomer = vi.mocked(useCustomerSuccessByCustomer);
@@ -38,6 +52,7 @@ const mockAssignOwner = vi.mocked(useAssignSuccessOwner);
 const mockUpdateHealth = vi.mocked(useUpdateSuccessHealth);
 const mockScheduleFollowup = vi.mocked(useScheduleFollowup);
 const mockArchive = vi.mocked(useArchiveCustomerSuccess);
+const mockRenewalsByCustomer = vi.mocked(useRenewalsByCustomer);
 
 const {
   HealthBadge,
@@ -91,6 +106,10 @@ function idleMutation() {
   return { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false };
 }
 
+function idleQuery() {
+  return { data: undefined, isLoading: false, isError: false };
+}
+
 function setupMutations() {
   mockUpdateHealth.mockReturnValue(idleMutation() as ReturnType<typeof useUpdateSuccessHealth>);
   mockScheduleFollowup.mockReturnValue(idleMutation() as ReturnType<typeof useScheduleFollowup>);
@@ -98,6 +117,7 @@ function setupMutations() {
   mockArchive.mockReturnValue(idleMutation() as ReturnType<typeof useArchiveCustomerSuccess>);
   mockCreate.mockReturnValue(idleMutation() as ReturnType<typeof useCreateCustomerSuccess>);
   mockUpdate.mockReturnValue(idleMutation() as ReturnType<typeof useUpdateCustomerSuccess>);
+  mockRenewalsByCustomer.mockReturnValue(idleQuery() as ReturnType<typeof useRenewalsByCustomer>);
 }
 
 // ── HealthBadge ───────────────────────────────────────────────────────────────

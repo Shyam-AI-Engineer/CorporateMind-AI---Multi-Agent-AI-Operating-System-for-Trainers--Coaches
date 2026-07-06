@@ -11,6 +11,7 @@ import {
   useArchiveCustomerSuccess,
   useCustomerSuccessByCustomer,
 } from "@/features/customers/api/use-customer-success";
+import { NextRenewalCard } from "@/features/customers/ui/renewal-center";
 import type {
   CustomerSuccess,
   CustomerSuccessCreate,
@@ -420,6 +421,9 @@ export function CustomerSuccessDrawer({ record, workspaceId, onClose }: DrawerPr
           </div>
         )}
       </div>
+
+      {/* Next renewal summary */}
+      <NextRenewalCard customerId={record.customer_id} workspaceId={workspaceId} />
 
       {/* Health change */}
       <div className="mt-6 space-y-2">
