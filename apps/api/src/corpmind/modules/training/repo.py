@@ -1,4 +1,4 @@
-"""Training Engagement, Session, Attendance, and Certificate repositories — Sprint 42–45."""
+"""Training Engagement, Session, Attendance, Certificate, and Feedback repositories — Sprint 42–46."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from corpmind.modules.training.models import (
     TrainingAttendance,
     TrainingCertificate,
     TrainingEngagement,
+    TrainingFeedback,
     TrainingSession,
 )
 
@@ -487,4 +488,139 @@ class TrainingCertificateRepo:
                     func.lower(TrainingCertificate.certificate_number).like(term),
                 )
             )
+        return q
+
+
+class TrainingFeedbackRepo:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, feedback: TrainingFeedback) -> TrainingFeedback:
+        self._session.add(feedback)
+        return feedback
+
+    async def find_by_id(self, feedback_id: uuid.UUID) -> Optional[TrainingFeedback]:
+        result = await self._session.execute(
+            select(TrainingFeedback).where(TrainingFeedback.id == feedback_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def find_by_attendance_id(
+        self, attendance_id: uuid.UUID
+    ) -> Optional[TrainingFeedback]:
+        result = await self._session.execute(
+            select(TrainingFeedback).where(
+                TrainingFeedback.attendance_id == attendance_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def update_fields(self, feedback_id: uuid.UUID, **values: Any) -> None:
+        obj = await self.find_by_id(feedback_id)
+        if obj:
+            for key, value in values.items():
+                setattr(obj, key, value)
+
+    async def count(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        session_id: Optional[uuid.UUID] = None,
+        customer_id: Optional[uuid.UUID] = None,
+        trainer_id: Optional[uuid.UUID] = None,
+        min_rating: Optional[int] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        q = select(func.count()).select_from(TrainingFeedback).where(
+            TrainingFeedback.workspace_id == workspace_id
+        )
+        q = self._apply_filters(q, session_id, customer_id, trainer_id, min_rating, search)
+        result = await self._session.execute(q)
+        return result.scalar_one()
+
+    async def list_page(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        session_id: Optional[uuid.UUID] = None,
+        customer_id: Optional[uuid.UUID] = None,
+        trainer_id: Optional[uuid.UUID] = None,
+        min_rating: Optional[int] = None,
+        search: Optional[str] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[TrainingFeedback]:
+        q = select(TrainingFeedback).where(
+            TrainingFeedback.workspace_id == workspace_id
+        )
+        q = self._apply_filters(q, session_id, customer_id, trainer_id, min_rating, search)
+        if cursor:
+            cursor_ts, cursor_id = decode_cursor(cursor)
+            q = q.where(
+                (TrainingFeedback.created_at < cursor_ts)
+                | (
+                    (TrainingFeedback.created_at == cursor_ts)
+                    & (TrainingFeedback.id < cursor_id)
+                )
+            )
+        q = q.order_by(
+            TrainingFeedback.created_at.desc(), TrainingFeedback.id.desc()
+        ).limit(limit)
+        result = await self._session.execute(q)
+        return list(result.scalars().all())
+
+    async def list_by_session(self, session_id: uuid.UUID) -> list[TrainingFeedback]:
+        result = await self._session.execute(
+            select(TrainingFeedback)
+            .where(TrainingFeedback.session_id == session_id)
+            .order_by(TrainingFeedback.submitted_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def list_by_customer(
+        self, workspace_id: uuid.UUID, customer_id: uuid.UUID
+    ) -> list[TrainingFeedback]:
+        result = await self._session.execute(
+            select(TrainingFeedback)
+            .where(
+                TrainingFeedback.workspace_id == workspace_id,
+                TrainingFeedback.customer_id == customer_id,
+            )
+            .order_by(TrainingFeedback.submitted_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def list_by_trainer(
+        self, workspace_id: uuid.UUID, trainer_id: uuid.UUID
+    ) -> list[TrainingFeedback]:
+        result = await self._session.execute(
+            select(TrainingFeedback)
+            .where(
+                TrainingFeedback.workspace_id == workspace_id,
+                TrainingFeedback.trainer_id == trainer_id,
+            )
+            .order_by(TrainingFeedback.submitted_at.desc())
+        )
+        return list(result.scalars().all())
+
+    def _apply_filters(
+        self,
+        q: Any,
+        session_id: Optional[uuid.UUID],
+        customer_id: Optional[uuid.UUID],
+        trainer_id: Optional[uuid.UUID],
+        min_rating: Optional[int],
+        search: Optional[str],
+    ) -> Any:
+        if session_id:
+            q = q.where(TrainingFeedback.session_id == session_id)
+        if customer_id:
+            q = q.where(TrainingFeedback.customer_id == customer_id)
+        if trainer_id:
+            q = q.where(TrainingFeedback.trainer_id == trainer_id)
+        if min_rating is not None:
+            q = q.where(TrainingFeedback.overall_rating >= min_rating)
+        if search:
+            term = f"%{search.lower()}%"
+            q = q.where(func.lower(TrainingFeedback.comments).like(term))
         return q

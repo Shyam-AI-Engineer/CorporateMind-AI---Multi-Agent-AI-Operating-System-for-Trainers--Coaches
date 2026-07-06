@@ -385,3 +385,69 @@ export interface TrainingCertificateFilters {
   cursor?: string;
   limit?: number;
 }
+
+// ── Feedback types ────────────────────────────────────────────────────────────
+
+export interface TrainingFeedback {
+  id: string;
+  tenant_id: string;
+  workspace_id: string;
+  attendance_id: string;
+  session_id: string;
+  customer_id: string;
+  trainer_id: string | null;
+  overall_rating: number | null;
+  trainer_rating: number | null;
+  content_rating: number | null;
+  materials_rating: number | null;
+  venue_rating: number | null;
+  would_recommend: boolean | null;
+  comments: string | null;
+  submitted_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrainingFeedbackListOut {
+  items: TrainingFeedback[];
+  next_cursor: string | null;
+  has_more: boolean;
+  total: number;
+}
+
+export interface TrainingFeedbackCreate {
+  workspace_id: string;
+  attendance_id: string;
+  session_id: string;
+  customer_id: string;
+  trainer_id?: string;
+  overall_rating?: number;
+  trainer_rating?: number;
+  content_rating?: number;
+  materials_rating?: number;
+  venue_rating?: number;
+  would_recommend?: boolean;
+  comments?: string;
+  submitted_at?: string;
+}
+
+export interface TrainingFeedbackUpdate {
+  overall_rating?: number;
+  trainer_rating?: number;
+  content_rating?: number;
+  materials_rating?: number;
+  venue_rating?: number;
+  would_recommend?: boolean;
+  comments?: string;
+}
+
+export interface TrainingFeedbackFilters {
+  workspace_id: string;
+  session_id?: string;
+  customer_id?: string;
+  trainer_id?: string;
+  min_rating?: number;
+  search?: string;
+  cursor?: string;
+  limit?: number;
+}

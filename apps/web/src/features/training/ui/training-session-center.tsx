@@ -21,6 +21,8 @@ import type {
 } from "@/features/training/types";
 import { SESSION_STATUSES } from "@/features/training/types";
 import { CertificateCenter } from "@/features/training/ui/certificate-center";
+import { FeedbackCenter } from "@/features/training/ui/feedback-center";
+import { FeedbackCenter } from "@/features/training/ui/feedback-center";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -663,7 +665,7 @@ function SessionDrawer({
   onClose: () => void;
 }) {
   const [modal, setModal] = useState<ModalState>(null);
-  const [drawerTab, setDrawerTab] = useState<"overview" | "certificates">(
+  const [drawerTab, setDrawerTab] = useState<"overview" | "certificates" | "feedback">(
     "overview",
   );
   const start = useStartSession(workspaceId);
@@ -721,6 +723,17 @@ function SessionDrawer({
             }`}
           >
             Certificates
+          </button>
+          <button
+            data-testid="drawer-tab-feedback"
+            onClick={() => setDrawerTab("feedback")}
+            className={`px-4 py-2 text-sm font-medium ${
+              drawerTab === "feedback"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Feedback
           </button>
         </div>
 
@@ -869,6 +882,15 @@ function SessionDrawer({
         {drawerTab === "certificates" && (
           <div className="p-4">
             <CertificateCenter
+              sessionId={session.id}
+              workspaceId={workspaceId}
+            />
+          </div>
+        )}
+
+        {drawerTab === "feedback" && (
+          <div className="p-4">
+            <FeedbackCenter
               sessionId={session.id}
               workspaceId={workspaceId}
             />

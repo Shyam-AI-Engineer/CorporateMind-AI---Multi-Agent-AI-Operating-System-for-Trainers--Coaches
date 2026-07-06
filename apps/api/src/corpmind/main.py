@@ -170,6 +170,9 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.training.api import sessions_router as training_sessions_router
     from corpmind.modules.training.api import attendance_router as training_attendance_router
     from corpmind.modules.training.api import certificates_router as training_certificates_router
+    from corpmind.modules.training.api import feedback_router as training_feedback_router
+    from corpmind.modules.training.api import customers_feedback_router as training_customers_feedback_router
+    from corpmind.modules.training.api import trainers_feedback_router as training_trainers_feedback_router
 
     app.include_router(identity_router, prefix="/api/v1/identity", tags=["identity"])
     app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["inbox"])
@@ -185,6 +188,9 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(training_sessions_router, prefix="/api/v1/training-sessions", tags=["training"])
     app.include_router(training_attendance_router, prefix="/api/v1/training-attendance", tags=["training"])
     app.include_router(training_certificates_router, prefix="/api/v1/training-certificates", tags=["training"])
+    app.include_router(training_feedback_router, prefix="/api/v1/training-feedback", tags=["training"])
+    app.include_router(training_customers_feedback_router, prefix="/api/v1/customers", tags=["training"])
+    app.include_router(training_trainers_feedback_router, prefix="/api/v1/trainers", tags=["training"])
     app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
     app.include_router(billing_router, prefix="/api/v1/billing", tags=["billing"])
     app.include_router(social_router, prefix="/api/v1/social", tags=["social"])

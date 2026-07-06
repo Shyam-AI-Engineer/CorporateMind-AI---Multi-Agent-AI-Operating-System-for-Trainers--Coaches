@@ -14,6 +14,10 @@ vi.mock("@/features/customers/api/use-customers", () => ({
   useUpdateCustomerHealth: vi.fn(),
 }));
 
+vi.mock("@/features/training/api/use-training", () => ({
+  useCustomerFeedback: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+}));
+
 import {
   useCustomers,
   useCreateCustomer,

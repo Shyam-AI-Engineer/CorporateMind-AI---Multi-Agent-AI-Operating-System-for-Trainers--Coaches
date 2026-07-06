@@ -28,6 +28,11 @@ import type {
   TrainingEngagementFilters,
   TrainingEngagementListOut,
   TrainingEngagementUpdate,
+  TrainingFeedback,
+  TrainingFeedbackCreate,
+  TrainingFeedbackFilters,
+  TrainingFeedbackListOut,
+  TrainingFeedbackUpdate,
   TrainingSession,
   TrainingSessionCreate,
   TrainingSessionFilters,
@@ -669,6 +674,119 @@ export function useRevokeCertificate(workspaceId: string | null | undefined) {
     mutationFn: ({ id, body }) =>
       api.post<{ data: TrainingCertificate }>(
         `/api/v1/training-certificates/${id}/revoke`,
+        body,
+      ),
+    onSuccess: (_, { id, sessionId }) => invalidate(id, sessionId),
+  });
+}
+
+// ── Feedback hooks ────────────────────────────────────────────────────────────
+
+const FEEDBACK_LIST_KEY = (
+  workspaceId: string,
+  filters?: Partial<TrainingFeedbackFilters>,
+) => ["training-feedback", "list", workspaceId, filters ?? {}] as const;
+
+const FEEDBACK_DETAIL_KEY = (id: string) =>
+  ["training-feedback", "detail", id] as const;
+
+function useInvalidateFeedback(workspaceId: string | null | undefined) {
+  const qc = useQueryClient();
+  return (feedbackId: string, sessionId: string) => {
+    if (workspaceId) {
+      qc.invalidateQueries({ queryKey: ["training-feedback", "list", workspaceId] });
+    }
+    qc.invalidateQueries({ queryKey: FEEDBACK_DETAIL_KEY(feedbackId) });
+    qc.invalidateQueries({ queryKey: ["training-feedback", "session", sessionId] });
+  };
+}
+
+export function useFeedbackList(
+  filters: TrainingFeedbackFilters | null | undefined,
+) {
+  return useQuery<{ data: TrainingFeedbackListOut }>({
+    queryKey: FEEDBACK_LIST_KEY(filters?.workspace_id ?? "", filters ?? {}),
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (filters?.workspace_id) params.set("workspace_id", filters.workspace_id);
+      if (filters?.session_id) params.set("session_id", filters.session_id);
+      if (filters?.customer_id) params.set("customer_id", filters.customer_id);
+      if (filters?.trainer_id) params.set("trainer_id", filters.trainer_id);
+      if (filters?.min_rating != null) params.set("min_rating", String(filters.min_rating));
+      if (filters?.search) params.set("search", filters.search);
+      if (filters?.cursor) params.set("cursor", filters.cursor);
+      if (filters?.limit != null) params.set("limit", String(filters.limit));
+      return api.get<{ data: TrainingFeedbackListOut }>(
+        `/api/v1/training-feedback?${params.toString()}`,
+      );
+    },
+    enabled: !!filters?.workspace_id,
+    staleTime: STALE_MS,
+  });
+}
+
+export function useFeedbackDetail(feedbackId: string | null | undefined) {
+  return useQuery<{ data: TrainingFeedback }>({
+    queryKey: FEEDBACK_DETAIL_KEY(feedbackId ?? ""),
+    queryFn: () =>
+      api.get<{ data: TrainingFeedback }>(
+        `/api/v1/training-feedback/${feedbackId}`,
+      ),
+    enabled: !!feedbackId,
+    staleTime: STALE_MS,
+  });
+}
+
+export function useSessionFeedback(sessionId: string | null | undefined) {
+  return useQuery<{ data: TrainingFeedback[] }>({
+    queryKey: ["training-feedback", "session", sessionId ?? ""],
+    queryFn: () =>
+      api.get<{ data: TrainingFeedback[] }>(
+        `/api/v1/training-sessions/${sessionId}/feedback`,
+      ),
+    enabled: !!sessionId,
+    staleTime: STALE_MS,
+  });
+}
+
+export function useCustomerFeedback(
+  customerId: string | null | undefined,
+  workspaceId: string | null | undefined,
+) {
+  return useQuery<{ data: TrainingFeedback[] }>({
+    queryKey: ["training-feedback", "customer", customerId ?? "", workspaceId ?? ""],
+    queryFn: () =>
+      api.get<{ data: TrainingFeedback[] }>(
+        `/api/v1/customers/${customerId}/feedback?workspace_id=${workspaceId}`,
+      ),
+    enabled: !!customerId && !!workspaceId,
+    staleTime: STALE_MS,
+  });
+}
+
+export function useCreateFeedback(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateFeedback(workspaceId);
+  return useMutation<
+    { data: TrainingFeedback },
+    Error,
+    TrainingFeedbackCreate
+  >({
+    mutationFn: (body) =>
+      api.post<{ data: TrainingFeedback }>("/api/v1/training-feedback/", body),
+    onSuccess: (data) => invalidate(data.data.id, data.data.session_id),
+  });
+}
+
+export function useUpdateFeedback(workspaceId: string | null | undefined) {
+  const invalidate = useInvalidateFeedback(workspaceId);
+  return useMutation<
+    { data: TrainingFeedback },
+    Error,
+    { id: string; sessionId: string; body: TrainingFeedbackUpdate }
+  >({
+    mutationFn: ({ id, body }) =>
+      api.patch<{ data: TrainingFeedback }>(
+        `/api/v1/training-feedback/${id}`,
         body,
       ),
     onSuccess: (_, { id, sessionId }) => invalidate(id, sessionId),

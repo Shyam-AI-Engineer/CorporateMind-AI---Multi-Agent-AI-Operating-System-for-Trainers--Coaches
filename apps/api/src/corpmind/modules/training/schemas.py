@@ -1,4 +1,4 @@
-"""Training Engagement, Session, Attendance, and Certificate Pydantic v2 schemas — Sprint 42–45."""
+"""Training Engagement, Session, Attendance, Certificate, and Feedback Pydantic v2 schemas — Sprint 42–46."""
 
 from __future__ import annotations
 
@@ -487,3 +487,132 @@ class TrainingCertificateFilters(BaseModel):
     search: Optional[str] = None
     cursor: Optional[str] = None
     limit: int = 50
+
+
+# ── Feedback schemas ──────────────────────────────────────────────────────────
+
+def _validate_rating(v: Optional[int], field_name: str) -> Optional[int]:
+    if v is not None and not (1 <= v <= 5):
+        raise ValueError(f"{field_name} must be between 1 and 5")
+    return v
+
+
+class TrainingFeedbackOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    workspace_id: uuid.UUID
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    customer_id: uuid.UUID
+    trainer_id: Optional[uuid.UUID]
+    overall_rating: Optional[int]
+    trainer_rating: Optional[int]
+    content_rating: Optional[int]
+    materials_rating: Optional[int]
+    venue_rating: Optional[int]
+    would_recommend: Optional[bool]
+    comments: Optional[str]
+    submitted_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class TrainingFeedbackCreate(BaseModel):
+    workspace_id: uuid.UUID
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    customer_id: uuid.UUID
+    trainer_id: Optional[uuid.UUID] = None
+    overall_rating: Optional[int] = None
+    trainer_rating: Optional[int] = None
+    content_rating: Optional[int] = None
+    materials_rating: Optional[int] = None
+    venue_rating: Optional[int] = None
+    would_recommend: Optional[bool] = None
+    comments: Optional[str] = None
+    submitted_at: Optional[datetime] = None
+
+    @field_validator("overall_rating")
+    @classmethod
+    def validate_overall(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "overall_rating")
+
+    @field_validator("trainer_rating")
+    @classmethod
+    def validate_trainer(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "trainer_rating")
+
+    @field_validator("content_rating")
+    @classmethod
+    def validate_content(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "content_rating")
+
+    @field_validator("materials_rating")
+    @classmethod
+    def validate_materials(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "materials_rating")
+
+    @field_validator("venue_rating")
+    @classmethod
+    def validate_venue(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "venue_rating")
+
+
+class TrainingFeedbackUpdate(BaseModel):
+    overall_rating: Optional[int] = None
+    trainer_rating: Optional[int] = None
+    content_rating: Optional[int] = None
+    materials_rating: Optional[int] = None
+    venue_rating: Optional[int] = None
+    would_recommend: Optional[bool] = None
+    comments: Optional[str] = None
+
+    @field_validator("overall_rating")
+    @classmethod
+    def validate_overall(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "overall_rating")
+
+    @field_validator("trainer_rating")
+    @classmethod
+    def validate_trainer(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "trainer_rating")
+
+    @field_validator("content_rating")
+    @classmethod
+    def validate_content(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "content_rating")
+
+    @field_validator("materials_rating")
+    @classmethod
+    def validate_materials(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "materials_rating")
+
+    @field_validator("venue_rating")
+    @classmethod
+    def validate_venue(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "venue_rating")
+
+
+class TrainingFeedbackListOut(BaseModel):
+    items: list[TrainingFeedbackOut]
+    next_cursor: Optional[str]
+    has_more: bool
+    total: int
+
+
+class TrainingFeedbackFilters(BaseModel):
+    workspace_id: uuid.UUID
+    session_id: Optional[uuid.UUID] = None
+    customer_id: Optional[uuid.UUID] = None
+    trainer_id: Optional[uuid.UUID] = None
+    min_rating: Optional[int] = None
+    search: Optional[str] = None
+    cursor: Optional[str] = None
+    limit: int = 50
+
+    @field_validator("min_rating")
+    @classmethod
+    def validate_min_rating(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_rating(v, "min_rating")

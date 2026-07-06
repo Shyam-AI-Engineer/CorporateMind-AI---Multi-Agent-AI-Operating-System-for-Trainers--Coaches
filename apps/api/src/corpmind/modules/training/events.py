@@ -1,4 +1,4 @@
-"""Training Engagement, Session, Attendance, and Certificate domain events — Sprint 42–45."""
+"""Training Engagement, Session, Attendance, Certificate, and Feedback domain events — Sprint 42–46."""
 
 from __future__ import annotations
 
@@ -172,6 +172,28 @@ class CertificateIssued:
 @dataclass(frozen=True)
 class CertificateRevoked:
     certificate_id: uuid.UUID
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    tenant_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+# ── Feedback events ───────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class TrainingFeedbackCreated:
+    feedback_id: uuid.UUID
+    attendance_id: uuid.UUID
+    session_id: uuid.UUID
+    customer_id: uuid.UUID
+    tenant_id: uuid.UUID
+    overall_rating: int | None
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class TrainingFeedbackUpdated:
+    feedback_id: uuid.UUID
     attendance_id: uuid.UUID
     session_id: uuid.UUID
     tenant_id: uuid.UUID

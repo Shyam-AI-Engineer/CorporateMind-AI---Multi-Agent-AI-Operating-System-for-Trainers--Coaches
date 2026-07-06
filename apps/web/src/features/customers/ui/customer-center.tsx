@@ -20,6 +20,7 @@ import {
   CUSTOMER_HEALTH_STATUSES,
   CUSTOMER_STATUSES,
 } from "@/features/customers/types";
+import { useCustomerFeedback } from "@/features/training/api/use-training";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -287,6 +288,9 @@ function DetailDrawer({
         </div>
       </div>
 
+      {/* Feedback history */}
+      <CustomerFeedbackHistory customerId={customer.id} workspaceId={workspaceId} />
+
       <div className="mt-6">
         <button
           onClick={() => onArchive(customer.id)}
@@ -296,6 +300,62 @@ function DetailDrawer({
           Archive customer
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Customer feedback history (read-only) ─────────────────────────────────────
+
+export function CustomerFeedbackHistory({
+  customerId,
+  workspaceId,
+}: {
+  customerId: string;
+  workspaceId: string;
+}) {
+  const { data, isLoading } = useCustomerFeedback(customerId, workspaceId);
+  const items = data?.data ?? [];
+
+  return (
+    <div data-testid="customer-feedback-history" className="mt-6">
+      <p className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        Feedback History
+      </p>
+      {isLoading && (
+        <p data-testid="feedback-history-loading" className="text-xs text-muted-foreground">
+          Loading…
+        </p>
+      )}
+      {!isLoading && items.length === 0 && (
+        <p data-testid="feedback-history-empty" className="text-xs text-muted-foreground">
+          No feedback recorded yet.
+        </p>
+      )}
+      {!isLoading && items.length > 0 && (
+        <ul data-testid="feedback-history-list" className="space-y-2">
+          {items.map((f) => (
+            <li
+              key={f.id}
+              data-testid="feedback-history-item"
+              className="rounded border px-3 py-2 text-xs"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-medium">
+                  {f.overall_rating != null ? `★ ${f.overall_rating}/5` : "No rating"}
+                </span>
+                <span className="text-muted-foreground">
+                  {new Date(f.submitted_at).toLocaleDateString()}
+                </span>
+              </div>
+              {f.comments && (
+                <p data-testid="feedback-history-comment" className="mt-1 text-muted-foreground truncate">
+                  {f.comments}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-"""Training services: Engagement, Session, Attendance, Certificate — Sprint 42–45."""
+"""Training services: Engagement, Session, Attendance, Certificate, Feedback — Sprint 42–46."""
 
 from __future__ import annotations
 
@@ -16,12 +16,14 @@ from corpmind.modules.training.models import (
     TrainingAttendance,
     TrainingCertificate,
     TrainingEngagement,
+    TrainingFeedback,
     TrainingSession,
 )
 from corpmind.modules.training.repo import (
     TrainingAttendanceRepo,
     TrainingCertificateRepo,
     TrainingEngagementRepo,
+    TrainingFeedbackRepo,
     TrainingSessionRepo,
     encode_cursor,
 )
@@ -48,6 +50,11 @@ from corpmind.modules.training.schemas import (
     TrainingEngagementListOut,
     TrainingEngagementOut,
     TrainingEngagementUpdate,
+    TrainingFeedbackCreate,
+    TrainingFeedbackFilters,
+    TrainingFeedbackListOut,
+    TrainingFeedbackOut,
+    TrainingFeedbackUpdate,
     TrainingSessionCreate,
     TrainingSessionFilters,
     TrainingSessionListOut,
@@ -1082,5 +1089,228 @@ class TrainingCertificateService:
         try:
             redis = get_redis()
             await redis.delete(_cert_detail_key(org_id, cert_id))
+        except Exception:
+            pass
+
+
+# ── Feedback cache keys ───────────────────────────────────────────────────────
+
+def _feedback_list_key(org_id: uuid.UUID, session_id: uuid.UUID) -> str:
+    return f"t:{org_id}:training:feedback:list:{session_id}"
+
+
+def _feedback_detail_key(org_id: uuid.UUID, feedback_id: uuid.UUID) -> str:
+    return f"t:{org_id}:training:feedback:detail:{feedback_id}"
+
+
+class TrainingFeedbackService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._repo = TrainingFeedbackRepo(session)
+        self._attendance_repo = TrainingAttendanceRepo(session)
+
+    async def create_feedback(
+        self, req: TrainingFeedbackCreate
+    ) -> TrainingFeedbackOut:
+        ctx = get_tenant_context()
+
+        attendance = await self._attendance_repo.find_by_id(req.attendance_id)
+        if not attendance:
+            raise NotFoundError(f"Attendance record {req.attendance_id} not found")
+
+        existing = await self._repo.find_by_attendance_id(req.attendance_id)
+        if existing:
+            raise ValidationError(
+                f"Feedback already exists for attendance {req.attendance_id}"
+            )
+
+        now = datetime.now(UTC)
+        feedback = TrainingFeedback(
+            id=uuid.uuid4(),
+            tenant_id=ctx.org_id,
+            workspace_id=req.workspace_id,
+            attendance_id=req.attendance_id,
+            session_id=req.session_id,
+            customer_id=req.customer_id,
+            trainer_id=req.trainer_id,
+            overall_rating=req.overall_rating,
+            trainer_rating=req.trainer_rating,
+            content_rating=req.content_rating,
+            materials_rating=req.materials_rating,
+            venue_rating=req.venue_rating,
+            would_recommend=req.would_recommend,
+            comments=req.comments,
+            submitted_at=req.submitted_at or now,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._repo.create(feedback)
+        await self._session.commit()
+        await self._bust_feedback_list_cache(ctx.org_id, req.session_id)
+
+        log.info(
+            "training.feedback.created",
+            feedback_id=str(feedback.id),
+            session_id=str(req.session_id),
+            tenant_id=str(ctx.org_id),
+        )
+        return TrainingFeedbackOut.model_validate(feedback)
+
+    async def get_feedback(self, feedback_id: uuid.UUID) -> TrainingFeedbackOut:
+        ctx = get_tenant_context()
+        key = _feedback_detail_key(ctx.org_id, feedback_id)
+        redis = get_redis()
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return TrainingFeedbackOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        feedback = await self._repo.find_by_id(feedback_id)
+        if not feedback:
+            raise NotFoundError(f"Feedback {feedback_id} not found")
+
+        out = TrainingFeedbackOut.model_validate(feedback)
+        try:
+            await redis.set(key, out.model_dump_json(), ex=_DETAIL_TTL)
+        except Exception:
+            pass
+        return out
+
+    async def update_feedback(
+        self, feedback_id: uuid.UUID, req: TrainingFeedbackUpdate
+    ) -> TrainingFeedbackOut:
+        ctx = get_tenant_context()
+        feedback = await self._repo.find_by_id(feedback_id)
+        if not feedback:
+            raise NotFoundError(f"Feedback {feedback_id} not found")
+
+        fields: dict = {"updated_at": datetime.now(UTC)}
+        for attr in (
+            "overall_rating",
+            "trainer_rating",
+            "content_rating",
+            "materials_rating",
+            "venue_rating",
+            "would_recommend",
+            "comments",
+        ):
+            val = getattr(req, attr)
+            if val is not None:
+                fields[attr] = val
+
+        await self._repo.update_fields(feedback_id, **fields)
+        await self._session.commit()
+        await self._bust_feedback_detail_cache(ctx.org_id, feedback_id)
+        await self._bust_feedback_list_cache(ctx.org_id, feedback.session_id)
+
+        log.info(
+            "training.feedback.updated",
+            feedback_id=str(feedback_id),
+            tenant_id=str(ctx.org_id),
+        )
+        return await self.get_feedback(feedback_id)
+
+    async def list_feedback(
+        self, filters: TrainingFeedbackFilters
+    ) -> TrainingFeedbackListOut:
+        ctx = get_tenant_context()
+        is_session_only = (
+            filters.session_id is not None
+            and filters.customer_id is None
+            and filters.trainer_id is None
+            and filters.min_rating is None
+            and filters.search is None
+            and filters.cursor is None
+            and filters.limit == 50
+        )
+
+        if is_session_only:
+            redis = get_redis()
+            key = _feedback_list_key(ctx.org_id, filters.session_id)  # type: ignore[arg-type]
+            try:
+                cached = await redis.get(key)
+                if cached:
+                    return TrainingFeedbackListOut.model_validate_json(cached)
+            except Exception:
+                pass
+
+        total = await self._repo.count(
+            filters.workspace_id,
+            session_id=filters.session_id,
+            customer_id=filters.customer_id,
+            trainer_id=filters.trainer_id,
+            min_rating=filters.min_rating,
+            search=filters.search,
+        )
+        rows = await self._repo.list_page(
+            filters.workspace_id,
+            session_id=filters.session_id,
+            customer_id=filters.customer_id,
+            trainer_id=filters.trainer_id,
+            min_rating=filters.min_rating,
+            search=filters.search,
+            cursor=filters.cursor,
+            limit=filters.limit,
+        )
+
+        next_cursor = None
+        if len(rows) == filters.limit:
+            last = rows[-1]
+            next_cursor = encode_cursor(last.created_at, last.id)
+
+        out = TrainingFeedbackListOut(
+            items=[TrainingFeedbackOut.model_validate(r) for r in rows],
+            next_cursor=next_cursor,
+            has_more=next_cursor is not None,
+            total=total,
+        )
+
+        if is_session_only and filters.session_id:
+            redis = get_redis()
+            try:
+                await redis.set(
+                    _feedback_list_key(ctx.org_id, filters.session_id),
+                    out.model_dump_json(),
+                    ex=_LIST_TTL,
+                )
+            except Exception:
+                pass
+        return out
+
+    async def list_by_session(
+        self, session_id: uuid.UUID
+    ) -> list[TrainingFeedbackOut]:
+        rows = await self._repo.list_by_session(session_id)
+        return [TrainingFeedbackOut.model_validate(r) for r in rows]
+
+    async def list_by_customer(
+        self, workspace_id: uuid.UUID, customer_id: uuid.UUID
+    ) -> list[TrainingFeedbackOut]:
+        rows = await self._repo.list_by_customer(workspace_id, customer_id)
+        return [TrainingFeedbackOut.model_validate(r) for r in rows]
+
+    async def list_by_trainer(
+        self, workspace_id: uuid.UUID, trainer_id: uuid.UUID
+    ) -> list[TrainingFeedbackOut]:
+        rows = await self._repo.list_by_trainer(workspace_id, trainer_id)
+        return [TrainingFeedbackOut.model_validate(r) for r in rows]
+
+    async def _bust_feedback_list_cache(
+        self, org_id: uuid.UUID, session_id: uuid.UUID
+    ) -> None:
+        try:
+            redis = get_redis()
+            await redis.delete(_feedback_list_key(org_id, session_id))
+        except Exception:
+            pass
+
+    async def _bust_feedback_detail_cache(
+        self, org_id: uuid.UUID, feedback_id: uuid.UUID
+    ) -> None:
+        try:
+            redis = get_redis()
+            await redis.delete(_feedback_detail_key(org_id, feedback_id))
         except Exception:
             pass

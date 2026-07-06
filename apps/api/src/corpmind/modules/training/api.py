@@ -1,4 +1,4 @@
-"""Training Engagement, Session, Attendance, and Certificate REST API — Sprint 42–45."""
+"""Training Engagement, Session, Attendance, Certificate, and Feedback REST API — Sprint 42–46."""
 
 from __future__ import annotations
 
@@ -35,6 +35,11 @@ from corpmind.modules.training.schemas import (
     TrainingEngagementListOut,
     TrainingEngagementOut,
     TrainingEngagementUpdate,
+    TrainingFeedbackCreate,
+    TrainingFeedbackFilters,
+    TrainingFeedbackListOut,
+    TrainingFeedbackOut,
+    TrainingFeedbackUpdate,
     TrainingSessionCreate,
     TrainingSessionFilters,
     TrainingSessionListOut,
@@ -45,6 +50,7 @@ from corpmind.modules.training.service import (
     TrainingAttendanceService,
     TrainingCertificateService,
     TrainingEngagementService,
+    TrainingFeedbackService,
     TrainingSessionService,
 )
 
@@ -52,6 +58,9 @@ router = APIRouter()
 sessions_router = APIRouter()
 attendance_router = APIRouter()
 certificates_router = APIRouter()
+feedback_router = APIRouter()
+customers_feedback_router = APIRouter()
+trainers_feedback_router = APIRouter()
 
 
 @router.post(
@@ -569,3 +578,113 @@ async def revoke_certificate(
     session: AsyncSession = Depends(get_session),
 ) -> TrainingCertificateOut:
     return await TrainingCertificateService(session).revoke_certificate(cert_id, req)
+
+
+# ── Feedback endpoints ─────────────────────────────────────────────────────────
+
+@feedback_router.post(
+    "/",
+    response_model=TrainingFeedbackOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Submit feedback for an attendance record",
+)
+async def create_feedback(
+    req: TrainingFeedbackCreate,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingFeedbackOut:
+    return await TrainingFeedbackService(session).create_feedback(req)
+
+
+@feedback_router.get(
+    "/",
+    response_model=TrainingFeedbackListOut,
+    summary="List feedback records (cursor-paginated)",
+)
+async def list_feedback(
+    workspace_id: uuid.UUID = Query(...),
+    session_id: uuid.UUID | None = Query(default=None),
+    customer_id: uuid.UUID | None = Query(default=None),
+    trainer_id: uuid.UUID | None = Query(default=None),
+    min_rating: int | None = Query(default=None, ge=1, le=5),
+    search: str | None = Query(default=None),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+) -> TrainingFeedbackListOut:
+    filters = TrainingFeedbackFilters(
+        workspace_id=workspace_id,
+        session_id=session_id,
+        customer_id=customer_id,
+        trainer_id=trainer_id,
+        min_rating=min_rating,
+        search=search,
+        cursor=cursor,
+        limit=limit,
+    )
+    return await TrainingFeedbackService(session).list_feedback(filters)
+
+
+@feedback_router.get(
+    "/{feedback_id}",
+    response_model=TrainingFeedbackOut,
+    summary="Get a feedback record by ID",
+)
+async def get_feedback(
+    feedback_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingFeedbackOut:
+    return await TrainingFeedbackService(session).get_feedback(feedback_id)
+
+
+@feedback_router.patch(
+    "/{feedback_id}",
+    response_model=TrainingFeedbackOut,
+    summary="Update a feedback record",
+)
+async def update_feedback(
+    feedback_id: uuid.UUID,
+    req: TrainingFeedbackUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> TrainingFeedbackOut:
+    return await TrainingFeedbackService(session).update_feedback(feedback_id, req)
+
+
+# Session-scoped feedback (added to sessions_router)
+@sessions_router.get(
+    "/{session_id}/feedback",
+    response_model=list[TrainingFeedbackOut],
+    summary="List all feedback for a training session",
+)
+async def list_session_feedback(
+    session_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> list[TrainingFeedbackOut]:
+    return await TrainingFeedbackService(session).list_by_session(session_id)
+
+
+# Customer-scoped feedback (mounted at /api/v1/customers)
+@customers_feedback_router.get(
+    "/{customer_id}/feedback",
+    response_model=list[TrainingFeedbackOut],
+    summary="List all training feedback for a customer",
+)
+async def list_customer_feedback(
+    customer_id: uuid.UUID,
+    workspace_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> list[TrainingFeedbackOut]:
+    return await TrainingFeedbackService(session).list_by_customer(workspace_id, customer_id)
+
+
+# Trainer-scoped feedback (mounted at /api/v1/trainers)
+@trainers_feedback_router.get(
+    "/{trainer_id}/feedback",
+    response_model=list[TrainingFeedbackOut],
+    summary="List all training feedback for a trainer",
+)
+async def list_trainer_feedback(
+    trainer_id: uuid.UUID,
+    workspace_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> list[TrainingFeedbackOut]:
+    return await TrainingFeedbackService(session).list_by_trainer(workspace_id, trainer_id)

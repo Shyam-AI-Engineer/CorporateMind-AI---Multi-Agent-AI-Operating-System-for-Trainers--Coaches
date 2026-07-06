@@ -1,11 +1,11 @@
-"""Training Engagement, Session, Attendance, and Certificate ORM models — Sprint 42–45."""
+"""Training Engagement, Session, Attendance, Certificate, and Feedback ORM models — Sprint 42–46."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, Integer, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -155,6 +155,46 @@ class TrainingCertificate(TenantBase):
     download_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     verification_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TrainingFeedback(TenantBase):
+    """Participant satisfaction feedback. Exactly one record per attendance record."""
+
+    __tablename__ = "training_feedback"
+    __table_args__ = (
+        UniqueConstraint("attendance_id", name="uq_training_feedback_attendance_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), nullable=False, index=True
+    )
+    attendance_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), nullable=False
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), nullable=False, index=True
+    )
+    customer_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), nullable=False, index=True
+    )
+    trainer_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), nullable=True, index=True
+    )
+
+    overall_rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    trainer_rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    content_rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    materials_rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    venue_rating: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    would_recommend: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
