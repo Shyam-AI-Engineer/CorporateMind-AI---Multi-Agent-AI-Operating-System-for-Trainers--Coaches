@@ -92,3 +92,96 @@ export const INVOICE_STATUSES: InvoiceStatus[] = [
   "cancelled",
   "overdue",
 ];
+
+// ── Payment types ─────────────────────────────────────────────────────────────
+
+export type PaymentMethod =
+  | "cash"
+  | "bank_transfer"
+  | "upi"
+  | "credit_card"
+  | "cheque"
+  | "other";
+
+export type PaymentStatus = "pending" | "confirmed" | "cancelled";
+
+export const PAYMENT_METHODS: PaymentMethod[] = [
+  "cash",
+  "bank_transfer",
+  "upi",
+  "credit_card",
+  "cheque",
+  "other",
+];
+
+export const PAYMENT_STATUSES: PaymentStatus[] = [
+  "pending",
+  "confirmed",
+  "cancelled",
+];
+
+export interface InvoicePayment {
+  id: string;
+  workspace_id: string;
+  invoice_id: string;
+  customer_id: string;
+  payment_date: string | null;
+  amount: string | null;
+  payment_method: PaymentMethod | null;
+  reference_number: string | null;
+  status: PaymentStatus;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvoicePaymentCreate {
+  workspace_id: string;
+  invoice_id: string;
+  customer_id: string;
+  payment_date?: string | null;
+  amount: string;
+  payment_method?: PaymentMethod | null;
+  reference_number?: string | null;
+  notes?: string | null;
+  created_by?: string | null;
+}
+
+export interface InvoicePaymentUpdate {
+  payment_date?: string | null;
+  amount?: string | null;
+  payment_method?: PaymentMethod | null;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
+export interface InvoicePaymentFilters {
+  workspace_id: string;
+  invoice_id?: string;
+  customer_id?: string;
+  status?: PaymentStatus;
+  payment_method?: PaymentMethod;
+  payment_date_from?: string;
+  payment_date_to?: string;
+  search?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface InvoicePaymentListOut {
+  items: InvoicePayment[];
+  next_cursor: string | null;
+  has_more: boolean;
+  total: number;
+}
+
+export interface RevenueSummaryOut {
+  total_collected: string;
+  total_outstanding: string;
+  total_overdue: string;
+  count_pending_payments: number;
+  count_confirmed_payments: number;
+  count_cancelled_payments: number;
+  partial_payment_invoices: number;
+}

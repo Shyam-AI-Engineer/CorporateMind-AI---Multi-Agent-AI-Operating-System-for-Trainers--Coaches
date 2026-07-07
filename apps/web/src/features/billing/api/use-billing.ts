@@ -9,7 +9,13 @@ import type {
   CustomerInvoiceListOut,
   CustomerInvoiceUpdate,
   InvoiceKPIsOut,
+  InvoicePayment,
+  InvoicePaymentCreate,
+  InvoicePaymentFilters,
+  InvoicePaymentListOut,
+  InvoicePaymentUpdate,
   MarkInvoicePaid,
+  RevenueSummaryOut,
 } from "@/features/billing/types-billing";
 
 const STALE_MS = 300_000;
@@ -160,5 +166,144 @@ export function useCancelInvoice(workspaceId: string) {
         {}
       ),
     onSuccess: (_, id) => invalidate(id),
+  });
+}
+
+// ── Payment hooks ─────────────────────────────────────────────────────────────
+
+const PAYMENT_LIST_KEY = (
+  workspaceId: string,
+  filters?: Partial<InvoicePaymentFilters>
+) => ["payments", "list", workspaceId, filters ?? {}] as const;
+
+const PAYMENT_DETAIL_KEY = (id: string) => ["payments", "detail", id] as const;
+
+const PAYMENT_INVOICE_KEY = (invoiceId: string) =>
+  ["payments", "invoice", invoiceId] as const;
+
+const REVENUE_SUMMARY_KEY = (workspaceId: string) =>
+  ["payments", "revenue-summary", workspaceId] as const;
+
+function useInvalidatePayment(workspaceId: string | null | undefined) {
+  const qc = useQueryClient();
+  return (recordId?: string, invoiceId?: string) => {
+    if (workspaceId) {
+      void qc.invalidateQueries({ queryKey: ["payments", "list", workspaceId] });
+      void qc.invalidateQueries({ queryKey: REVENUE_SUMMARY_KEY(workspaceId) });
+    }
+    if (recordId) void qc.invalidateQueries({ queryKey: PAYMENT_DETAIL_KEY(recordId) });
+    if (invoiceId)
+      void qc.invalidateQueries({ queryKey: PAYMENT_INVOICE_KEY(invoiceId) });
+  };
+}
+
+export function useRevenueSummary(workspaceId: string | null | undefined) {
+  return useQuery<{ data: RevenueSummaryOut }>({
+    queryKey: REVENUE_SUMMARY_KEY(workspaceId ?? ""),
+    queryFn: () => {
+      const params = new URLSearchParams({ workspace_id: workspaceId! });
+      return api.get<{ data: RevenueSummaryOut }>(
+        `/api/v1/billing/revenue-summary?${params}`
+      );
+    },
+    staleTime: STALE_MS,
+    enabled: !!workspaceId,
+  });
+}
+
+export function usePaymentList(filters: InvoicePaymentFilters | null | undefined) {
+  const workspaceId = filters?.workspace_id ?? "";
+  return useQuery<{ data: InvoicePaymentListOut }>({
+    queryKey: PAYMENT_LIST_KEY(workspaceId, filters ?? {}),
+    queryFn: () => {
+      if (!workspaceId) throw new Error("workspace_id required");
+      const params = new URLSearchParams({ workspace_id: workspaceId });
+      if (filters?.invoice_id) params.set("invoice_id", filters.invoice_id);
+      if (filters?.customer_id) params.set("customer_id", filters.customer_id);
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.payment_method)
+        params.set("payment_method", filters.payment_method);
+      if (filters?.payment_date_from)
+        params.set("payment_date_from", filters.payment_date_from);
+      if (filters?.payment_date_to)
+        params.set("payment_date_to", filters.payment_date_to);
+      if (filters?.search) params.set("search", filters.search);
+      if (filters?.cursor) params.set("cursor", filters.cursor);
+      if (filters?.limit) params.set("limit", String(filters.limit));
+      return api.get<{ data: InvoicePaymentListOut }>(
+        `/api/v1/billing/payments?${params}`
+      );
+    },
+    staleTime: STALE_MS,
+    enabled: !!workspaceId,
+  });
+}
+
+export function usePaymentDetail(recordId: string | null | undefined) {
+  return useQuery<{ data: InvoicePayment }>({
+    queryKey: PAYMENT_DETAIL_KEY(recordId ?? ""),
+    queryFn: () =>
+      api.get<{ data: InvoicePayment }>(`/api/v1/billing/payments/${recordId}`),
+    staleTime: STALE_MS,
+    enabled: !!recordId,
+  });
+}
+
+export function usePaymentsByInvoice(invoiceId: string | null | undefined) {
+  return useQuery<{ data: InvoicePayment[] }>({
+    queryKey: PAYMENT_INVOICE_KEY(invoiceId ?? ""),
+    queryFn: () =>
+      api.get<{ data: InvoicePayment[] }>(
+        `/api/v1/billing/invoices/${invoiceId}/payments`
+      ),
+    staleTime: STALE_MS,
+    enabled: !!invoiceId,
+  });
+}
+
+export function useRecordPayment(workspaceId: string) {
+  const invalidate = useInvalidatePayment(workspaceId);
+  return useMutation<{ data: InvoicePayment }, Error, InvoicePaymentCreate>({
+    mutationFn: (body) =>
+      api.post<{ data: InvoicePayment }>("/api/v1/billing/payments", body),
+    onSuccess: (data) =>
+      invalidate(data.data.id, data.data.invoice_id),
+  });
+}
+
+export function useUpdatePayment(workspaceId: string) {
+  const invalidate = useInvalidatePayment(workspaceId);
+  return useMutation<
+    { data: InvoicePayment },
+    Error,
+    { id: string; body: InvoicePaymentUpdate; invoiceId?: string }
+  >({
+    mutationFn: ({ id, body }) =>
+      api.patch<{ data: InvoicePayment }>(`/api/v1/billing/payments/${id}`, body),
+    onSuccess: (_, { id, invoiceId }) => invalidate(id, invoiceId),
+  });
+}
+
+export function useConfirmPayment(workspaceId: string) {
+  const invalidate = useInvalidatePayment(workspaceId);
+  return useMutation<{ data: InvoicePayment }, Error, { id: string; invoiceId?: string }>({
+    mutationFn: ({ id }) =>
+      api.post<{ data: InvoicePayment }>(
+        `/api/v1/billing/payments/${id}/confirm`,
+        {}
+      ),
+    onSuccess: (_, { id, invoiceId }) => invalidate(id, invoiceId),
+  });
+}
+
+export function useCancelPayment(workspaceId: string) {
+  const invalidate = useInvalidatePayment(workspaceId);
+  return useMutation<{ data: InvoicePayment }, Error, { id: string; invoiceId?: string }>({
+    mutationFn: ({ id }) =>
+      api.post<{ data: InvoicePayment }>(
+        `/api/v1/billing/payments/${id}/cancel`,
+        {}
+      ),
+    onSuccess: (_, { id, invoiceId }) => invalidate(id, invoiceId),
   });
 }

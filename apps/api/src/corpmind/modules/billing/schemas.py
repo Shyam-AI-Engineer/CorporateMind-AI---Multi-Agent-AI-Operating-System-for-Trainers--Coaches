@@ -120,3 +120,76 @@ class InvoiceKPIsOut(BaseModel):
     count_paid: int = 0
     count_overdue: int = 0
     count_cancelled: int = 0
+
+
+# ── Invoice Payment schemas ────────────────────────────────────────────────────
+
+PAYMENT_METHODS = frozenset({"cash", "bank_transfer", "upi", "credit_card", "cheque", "other"})
+PAYMENT_STATUSES = frozenset({"pending", "confirmed", "cancelled"})
+
+
+class InvoicePaymentCreate(BaseModel):
+    workspace_id: uuid.UUID
+    invoice_id: uuid.UUID
+    customer_id: uuid.UUID
+    payment_date: date | None = None
+    amount: Decimal
+    payment_method: str | None = None
+    reference_number: str | None = None
+    notes: str | None = None
+    created_by: uuid.UUID | None = None
+
+
+class InvoicePaymentUpdate(BaseModel):
+    payment_date: date | None = None
+    amount: Decimal | None = None
+    payment_method: str | None = None
+    reference_number: str | None = None
+    notes: str | None = None
+
+
+class InvoicePaymentOut(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    invoice_id: uuid.UUID
+    customer_id: uuid.UUID
+    payment_date: date | None = None
+    amount: Decimal | None = None
+    payment_method: str | None = None
+    reference_number: str | None = None
+    status: str
+    notes: str | None = None
+    created_by: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class InvoicePaymentFilters(BaseModel):
+    workspace_id: uuid.UUID
+    invoice_id: uuid.UUID | None = None
+    customer_id: uuid.UUID | None = None
+    status: str | None = None
+    payment_method: str | None = None
+    payment_date_from: date | None = None
+    payment_date_to: date | None = None
+    search: str | None = None
+    cursor: str | None = None
+    limit: int = 50
+
+
+class InvoicePaymentListOut(BaseModel):
+    items: list[InvoicePaymentOut]
+    total: int
+    next_cursor: str | None = None
+    has_more: bool
+
+
+class RevenueSummaryOut(BaseModel):
+    total_collected: Decimal = Decimal("0.00")
+    total_outstanding: Decimal = Decimal("0.00")
+    total_overdue: Decimal = Decimal("0.00")
+    count_pending_payments: int = 0
+    count_confirmed_payments: int = 0
+    count_cancelled_payments: int = 0
+    partial_payment_invoices: int = 0

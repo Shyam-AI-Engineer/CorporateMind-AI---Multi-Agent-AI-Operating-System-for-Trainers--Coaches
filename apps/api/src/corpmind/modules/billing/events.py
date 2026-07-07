@@ -62,3 +62,42 @@ class InvoiceCancelled:
     tenant_id: uuid.UUID
     customer_id: uuid.UUID
     occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+# ── Payment events ─────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class PaymentRecorded:
+    payment_id: uuid.UUID
+    invoice_id: uuid.UUID
+    tenant_id: uuid.UUID
+    customer_id: uuid.UUID
+    amount: Decimal | None
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class PaymentConfirmed:
+    payment_id: uuid.UUID
+    invoice_id: uuid.UUID
+    tenant_id: uuid.UUID
+    customer_id: uuid.UUID
+    amount: Decimal | None
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class PaymentCancelled:
+    payment_id: uuid.UUID
+    invoice_id: uuid.UUID
+    tenant_id: uuid.UUID
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class InvoiceFullyPaid:
+    invoice_id: uuid.UUID
+    tenant_id: uuid.UUID
+    customer_id: uuid.UUID
+    total_confirmed: Decimal
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))

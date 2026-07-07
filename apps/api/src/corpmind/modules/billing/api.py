@@ -16,11 +16,17 @@ from corpmind.modules.billing.schemas import (
     CustomerInvoiceOut,
     CustomerInvoiceUpdate,
     InvoiceKPIsOut,
+    InvoicePaymentCreate,
+    InvoicePaymentFilters,
+    InvoicePaymentListOut,
+    InvoicePaymentOut,
+    InvoicePaymentUpdate,
     MarkInvoicePaid,
+    RevenueSummaryOut,
     SubscriptionOut,
     UsageSummary,
 )
-from corpmind.modules.billing.service import BillingService, CustomerInvoiceService
+from corpmind.modules.billing.service import BillingService, CustomerInvoiceService, PaymentService
 
 router = APIRouter()
 
@@ -180,3 +186,106 @@ async def get_invoices_by_customer(
         customer_id=customer_id,
     )
     return await svc.list(filters)
+
+
+# ── Invoice payment history sub-route (under billing router) ──────────────────
+
+@router.get("/invoices/{record_id}/payments", response_model=list[InvoicePaymentOut])
+async def list_invoice_payments(
+    record_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> list[InvoicePaymentOut]:
+    return await PaymentService(session).list_invoice_payments(record_id)
+
+
+# ── Payment endpoints ─────────────────────────────────────────────────────────
+
+def _payment_svc(session: AsyncSession = Depends(get_session)) -> PaymentService:
+    return PaymentService(session)
+
+
+@router.get("/revenue-summary", response_model=RevenueSummaryOut)
+async def get_revenue_summary(
+    workspace_id: uuid.UUID = Query(...),
+    svc: PaymentService = Depends(_payment_svc),
+) -> RevenueSummaryOut:
+    return await svc.get_revenue_summary(workspace_id)
+
+
+@router.post(
+    "/payments",
+    response_model=InvoicePaymentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_payment(
+    body: InvoicePaymentCreate,
+    svc: PaymentService = Depends(_payment_svc),
+) -> InvoicePaymentOut:
+    return await svc.record_payment(body)
+
+
+@router.get("/payments", response_model=InvoicePaymentListOut)
+async def list_payments(
+    workspace_id: uuid.UUID = Query(...),
+    invoice_id: uuid.UUID | None = Query(None),
+    customer_id: uuid.UUID | None = Query(None),
+    status_filter: str | None = Query(None, alias="status"),
+    payment_method: str | None = Query(None),
+    payment_date_from: str | None = Query(None),
+    payment_date_to: str | None = Query(None),
+    search: str | None = Query(None),
+    cursor: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    svc: PaymentService = Depends(_payment_svc),
+) -> InvoicePaymentListOut:
+    from datetime import date as _date
+
+    def _pd(v: str | None):  # type: ignore[return]
+        return _date.fromisoformat(v) if v else None
+
+    filters = InvoicePaymentFilters(
+        workspace_id=workspace_id,
+        invoice_id=invoice_id,
+        customer_id=customer_id,
+        status=status_filter,
+        payment_method=payment_method,
+        payment_date_from=_pd(payment_date_from),
+        payment_date_to=_pd(payment_date_to),
+        search=search,
+        cursor=cursor,
+        limit=limit,
+    )
+    return await svc.list_payments(filters)
+
+
+@router.get("/payments/{record_id}", response_model=InvoicePaymentOut)
+async def get_payment(
+    record_id: uuid.UUID,
+    svc: PaymentService = Depends(_payment_svc),
+) -> InvoicePaymentOut:
+    return await svc.get_payment(record_id)
+
+
+@router.patch("/payments/{record_id}", response_model=InvoicePaymentOut)
+async def update_payment(
+    record_id: uuid.UUID,
+    body: InvoicePaymentUpdate,
+    svc: PaymentService = Depends(_payment_svc),
+) -> InvoicePaymentOut:
+    return await svc.update_payment(record_id, body)
+
+
+@router.post("/payments/{record_id}/confirm", response_model=InvoicePaymentOut)
+async def confirm_payment(
+    record_id: uuid.UUID,
+    svc: PaymentService = Depends(_payment_svc),
+) -> InvoicePaymentOut:
+    return await svc.confirm_payment(record_id)
+
+
+@router.post("/payments/{record_id}/cancel", response_model=InvoicePaymentOut)
+async def cancel_payment(
+    record_id: uuid.UUID,
+    svc: PaymentService = Depends(_payment_svc),
+) -> InvoicePaymentOut:
+    return await svc.cancel_payment(record_id)

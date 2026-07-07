@@ -14,11 +14,21 @@ from corpmind.core.tenancy import get_tenant_context
 from corpmind.modules.billing.events import (
     InvoiceCancelled,
     InvoiceCreated,
+    InvoiceFullyPaid,
     InvoiceIssued,
     InvoicePaid,
+    PaymentCancelled,
+    PaymentConfirmed,
+    PaymentRecorded,
 )
-from corpmind.modules.billing.models import CustomerInvoice, Subscription, UsageMeter
-from corpmind.modules.billing.repo import CustomerInvoiceRepo, SubscriptionRepo, UsageMeterRepo
+from corpmind.modules.billing.models import CustomerInvoice, InvoicePayment, Subscription, UsageMeter
+from corpmind.modules.billing.repo import (
+    CustomerInvoiceRepo,
+    InvoicePaymentRepo,
+    SubscriptionRepo,
+    UsageMeterRepo,
+    _encode_payment_cursor,
+)
 from corpmind.modules.billing.schemas import (
     BillingSummaryOut,
     CustomerInvoiceCreate,
@@ -27,7 +37,13 @@ from corpmind.modules.billing.schemas import (
     CustomerInvoiceOut,
     CustomerInvoiceUpdate,
     InvoiceKPIsOut,
+    InvoicePaymentCreate,
+    InvoicePaymentFilters,
+    InvoicePaymentListOut,
+    InvoicePaymentOut,
+    InvoicePaymentUpdate,
     MarkInvoicePaid,
+    RevenueSummaryOut,
     SubscriptionOut,
     UsageSummary,
 )
@@ -492,3 +508,403 @@ class CustomerInvoiceService:
             await redis.delete(_invoice_kpis_key(org_id, ws_id))
         except Exception:
             pass
+
+
+# ── Payment cache key helpers ─────────────────────────────────────────────────
+
+_PAYMENT_LIST_TTL = 300
+_PAYMENT_DETAIL_TTL = 300
+_PAYMENT_SUMMARY_TTL = 300
+
+_CANCELLABLE_PAYMENT_FROM = frozenset({"pending", "confirmed"})
+
+
+def _payment_list_key(org_id: uuid.UUID, ws_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{ws_id}:billing:payments:list"
+
+
+def _payment_detail_key(org_id: uuid.UUID, record_id: uuid.UUID) -> str:
+    return f"t:{org_id}:billing:payments:detail:{record_id}"
+
+
+def _payment_summary_key(org_id: uuid.UUID, ws_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{ws_id}:billing:payments:summary"
+
+
+# ── PaymentService ────────────────────────────────────────────────────────────
+
+class PaymentService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._payment_repo = InvoicePaymentRepo(session)
+        self._invoice_repo = CustomerInvoiceRepo(session)
+
+    async def record_payment(self, req: InvoicePaymentCreate) -> InvoicePaymentOut:
+        ctx = get_tenant_context()
+
+        invoice = await self._invoice_repo.find_by_id(req.invoice_id)
+        if not invoice:
+            raise NotFoundError(f"Invoice {req.invoice_id} not found")
+        if invoice.status == "cancelled":
+            raise ValidationError("Cannot add payment to a cancelled invoice")
+        if req.amount <= 0:
+            raise ValidationError("Payment amount must be greater than zero")
+
+        now = datetime.now(UTC)
+        record = InvoicePayment(
+            id=uuid.uuid4(),
+            tenant_id=ctx.org_id,
+            workspace_id=req.workspace_id,
+            invoice_id=req.invoice_id,
+            customer_id=req.customer_id,
+            payment_date=req.payment_date,
+            amount=req.amount,
+            payment_method=req.payment_method,
+            reference_number=req.reference_number,
+            status="pending",
+            notes=req.notes,
+            created_by=req.created_by,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._payment_repo.create(record)
+        await self._session.commit()
+
+        await self._bust_list_and_summary(ctx.org_id, req.workspace_id)
+
+        log.info(
+            "billing.payment.recorded",
+            payment_id=str(record.id),
+            invoice_id=str(req.invoice_id),
+            amount=str(req.amount),
+            tenant_id=str(ctx.org_id),
+        )
+        event = PaymentRecorded(
+            payment_id=record.id,
+            invoice_id=req.invoice_id,
+            tenant_id=ctx.org_id,
+            customer_id=req.customer_id,
+            amount=req.amount,
+        )
+        log.debug("billing.payment.event", event_type=event.__class__.__name__)
+        return InvoicePaymentOut.model_validate(record)
+
+    async def update_payment(
+        self, record_id: uuid.UUID, req: InvoicePaymentUpdate
+    ) -> InvoicePaymentOut:
+        ctx = get_tenant_context()
+        record = await self._payment_repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Payment {record_id} not found")
+        if record.status != "pending":
+            raise ValidationError(
+                f"Payment in status '{record.status}' cannot be updated; only pending payments are editable"
+            )
+        if req.amount is not None and req.amount <= 0:
+            raise ValidationError("Payment amount must be greater than zero")
+
+        changes: dict = {}
+        if req.payment_date is not None:
+            changes["payment_date"] = req.payment_date
+        if req.amount is not None:
+            changes["amount"] = req.amount
+        if req.payment_method is not None:
+            changes["payment_method"] = req.payment_method
+        if req.reference_number is not None:
+            changes["reference_number"] = req.reference_number
+        if req.notes is not None:
+            changes["notes"] = req.notes
+        changes["updated_at"] = datetime.now(UTC)
+
+        await self._payment_repo.update_fields(record_id, **changes)
+        await self._session.commit()
+        updated = await self._payment_repo.find_by_id(record_id)
+        assert updated is not None
+
+        await self._bust_detail_and_list(ctx.org_id, record.workspace_id, record_id)
+        log.info(
+            "billing.payment.updated",
+            payment_id=str(record_id),
+            tenant_id=str(ctx.org_id),
+        )
+        return InvoicePaymentOut.model_validate(updated)
+
+    async def confirm_payment(self, record_id: uuid.UUID) -> InvoicePaymentOut:
+        ctx = get_tenant_context()
+        record = await self._payment_repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Payment {record_id} not found")
+        if record.status != "pending":
+            raise ValidationError(
+                f"Payment in status '{record.status}' cannot be confirmed; must be pending"
+            )
+
+        invoice = await self._invoice_repo.find_by_id(record.invoice_id)
+        if not invoice:
+            raise NotFoundError(f"Invoice {record.invoice_id} not found")
+        if invoice.status == "cancelled":
+            raise ValidationError("Cannot confirm payment on a cancelled invoice")
+
+        # Overpayment guard — only when both amounts are present
+        if invoice.total_amount is not None and record.amount is not None:
+            total_confirmed_so_far = await self._payment_repo.sum_confirmed_for_invoice(
+                record.invoice_id
+            )
+            if total_confirmed_so_far + record.amount > invoice.total_amount:
+                raise ValidationError(
+                    f"Confirming this payment would exceed the invoice total of {invoice.total_amount}"
+                )
+
+        await self._payment_repo.update_fields(
+            record_id, status="confirmed", updated_at=datetime.now(UTC)
+        )
+        await self._session.commit()
+        updated = await self._payment_repo.find_by_id(record_id)
+        assert updated is not None
+
+        # Auto-settle invoice when fully covered
+        if invoice.total_amount is not None and invoice.status in {"issued", "overdue"}:
+            total_confirmed = await self._payment_repo.sum_confirmed_for_invoice(
+                record.invoice_id
+            )
+            if total_confirmed >= invoice.total_amount:
+                from datetime import date as _date
+                pay_date = updated.payment_date or _date.today()
+                await self._invoice_repo.update_fields(
+                    invoice.id,
+                    status="paid",
+                    payment_date=pay_date,
+                    updated_at=datetime.now(UTC),
+                )
+                await self._session.commit()
+                await self._bust_invoice_caches(ctx.org_id, invoice.workspace_id, invoice.id)
+                fully_paid_event = InvoiceFullyPaid(
+                    invoice_id=invoice.id,
+                    tenant_id=ctx.org_id,
+                    customer_id=invoice.customer_id,
+                    total_confirmed=total_confirmed,
+                )
+                log.info(
+                    "billing.payment.invoice_fully_paid",
+                    invoice_id=str(invoice.id),
+                    total_confirmed=str(total_confirmed),
+                    tenant_id=str(ctx.org_id),
+                )
+                log.debug(
+                    "billing.payment.event",
+                    event_type=fully_paid_event.__class__.__name__,
+                )
+
+        await self._bust_full_payment_caches(ctx.org_id, updated.workspace_id, record_id)
+
+        event = PaymentConfirmed(
+            payment_id=record_id,
+            invoice_id=updated.invoice_id,
+            tenant_id=ctx.org_id,
+            customer_id=updated.customer_id,
+            amount=updated.amount,
+        )
+        log.info(
+            "billing.payment.confirmed",
+            payment_id=str(record_id),
+            invoice_id=str(updated.invoice_id),
+            tenant_id=str(ctx.org_id),
+        )
+        log.debug("billing.payment.event", event_type=event.__class__.__name__)
+        return InvoicePaymentOut.model_validate(updated)
+
+    async def cancel_payment(self, record_id: uuid.UUID) -> InvoicePaymentOut:
+        ctx = get_tenant_context()
+        record = await self._payment_repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Payment {record_id} not found")
+        if record.status not in _CANCELLABLE_PAYMENT_FROM:
+            raise ValidationError(
+                f"Payment in status '{record.status}' cannot be cancelled"
+            )
+
+        await self._payment_repo.update_fields(
+            record_id, status="cancelled", updated_at=datetime.now(UTC)
+        )
+        await self._session.commit()
+        updated = await self._payment_repo.find_by_id(record_id)
+        assert updated is not None
+
+        await self._bust_full_payment_caches(ctx.org_id, updated.workspace_id, record_id)
+
+        event = PaymentCancelled(
+            payment_id=record_id,
+            invoice_id=updated.invoice_id,
+            tenant_id=ctx.org_id,
+        )
+        log.info(
+            "billing.payment.cancelled",
+            payment_id=str(record_id),
+            tenant_id=str(ctx.org_id),
+        )
+        log.debug("billing.payment.event", event_type=event.__class__.__name__)
+        return InvoicePaymentOut.model_validate(updated)
+
+    async def get_payment(self, record_id: uuid.UUID) -> InvoicePaymentOut:
+        ctx = get_tenant_context()
+        redis = get_redis()
+        key = _payment_detail_key(ctx.org_id, record_id)
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return InvoicePaymentOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        record = await self._payment_repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Payment {record_id} not found")
+
+        out = InvoicePaymentOut.model_validate(record)
+        try:
+            await redis.set(key, out.model_dump_json(), ex=_PAYMENT_DETAIL_TTL)
+        except Exception:
+            pass
+        return out
+
+    async def list_payments(self, filters: InvoicePaymentFilters) -> InvoicePaymentListOut:
+        ctx = get_tenant_context()
+        redis = get_redis()
+
+        _is_default = (
+            filters.invoice_id is None
+            and filters.customer_id is None
+            and filters.status is None
+            and filters.payment_method is None
+            and filters.payment_date_from is None
+            and filters.payment_date_to is None
+            and filters.search is None
+            and filters.cursor is None
+            and filters.limit == 50
+        )
+        if _is_default:
+            key = _payment_list_key(ctx.org_id, filters.workspace_id)
+            try:
+                cached = await redis.get(key)
+                if cached:
+                    return InvoicePaymentListOut.model_validate_json(cached)
+            except Exception:
+                pass
+
+        total = await self._payment_repo.count(
+            filters.workspace_id,
+            invoice_id=filters.invoice_id,
+            customer_id=filters.customer_id,
+            status=filters.status,
+            payment_method=filters.payment_method,
+            payment_date_from=filters.payment_date_from,
+            payment_date_to=filters.payment_date_to,
+            search=filters.search,
+        )
+        rows = await self._payment_repo.list_page(
+            filters.workspace_id,
+            invoice_id=filters.invoice_id,
+            customer_id=filters.customer_id,
+            status=filters.status,
+            payment_method=filters.payment_method,
+            payment_date_from=filters.payment_date_from,
+            payment_date_to=filters.payment_date_to,
+            search=filters.search,
+            cursor=filters.cursor,
+            limit=filters.limit,
+        )
+        has_more = len(rows) > filters.limit
+        page = rows[: filters.limit]
+        next_cursor = (
+            _encode_payment_cursor(page[-1].created_at, page[-1].id) if has_more else None
+        )
+
+        out = InvoicePaymentListOut(
+            items=[InvoicePaymentOut.model_validate(r) for r in page],
+            next_cursor=next_cursor,
+            has_more=has_more,
+            total=total,
+        )
+        if _is_default:
+            try:
+                await redis.set(
+                    _payment_list_key(ctx.org_id, filters.workspace_id),
+                    out.model_dump_json(),
+                    ex=_PAYMENT_LIST_TTL,
+                )
+            except Exception:
+                pass
+        return out
+
+    async def list_invoice_payments(self, invoice_id: uuid.UUID) -> list[InvoicePaymentOut]:
+        rows = await self._payment_repo.list_by_invoice(invoice_id)
+        return [InvoicePaymentOut.model_validate(r) for r in rows]
+
+    async def get_revenue_summary(self, workspace_id: uuid.UUID) -> RevenueSummaryOut:
+        ctx = get_tenant_context()
+        redis = get_redis()
+        key = _payment_summary_key(ctx.org_id, workspace_id)
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return RevenueSummaryOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        summary = await self._payment_repo.fetch_revenue_summary(workspace_id)
+        try:
+            await redis.set(key, summary.model_dump_json(), ex=_PAYMENT_SUMMARY_TTL)
+        except Exception:
+            pass
+        return summary
+
+    # ── Cache helpers ─────────────────────────────────────────────────────────
+
+    async def _bust_list_and_summary(self, org_id: uuid.UUID, ws_id: uuid.UUID) -> None:
+        redis = get_redis()
+        for key in [_payment_list_key(org_id, ws_id), _payment_summary_key(org_id, ws_id)]:
+            try:
+                await redis.delete(key)
+            except Exception:
+                pass
+
+    async def _bust_detail_and_list(
+        self, org_id: uuid.UUID, ws_id: uuid.UUID, record_id: uuid.UUID
+    ) -> None:
+        redis = get_redis()
+        for key in [
+            _payment_detail_key(org_id, record_id),
+            _payment_list_key(org_id, ws_id),
+        ]:
+            try:
+                await redis.delete(key)
+            except Exception:
+                pass
+
+    async def _bust_full_payment_caches(
+        self, org_id: uuid.UUID, ws_id: uuid.UUID, record_id: uuid.UUID
+    ) -> None:
+        redis = get_redis()
+        for key in [
+            _payment_detail_key(org_id, record_id),
+            _payment_list_key(org_id, ws_id),
+            _payment_summary_key(org_id, ws_id),
+        ]:
+            try:
+                await redis.delete(key)
+            except Exception:
+                pass
+
+    async def _bust_invoice_caches(
+        self, org_id: uuid.UUID, ws_id: uuid.UUID, invoice_id: uuid.UUID
+    ) -> None:
+        redis = get_redis()
+        for key in [
+            _invoice_detail_key(org_id, invoice_id),
+            _invoice_list_key(org_id, ws_id),
+            _invoice_kpis_key(org_id, ws_id),
+        ]:
+            try:
+                await redis.delete(key)
+            except Exception:
+                pass
