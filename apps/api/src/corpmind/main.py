@@ -146,6 +146,7 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.crm.api import router as crm_router
     from corpmind.modules.crm.api import lead_pipeline_router
     from corpmind.modules.billing.api import router as billing_router
+    from corpmind.modules.billing.api import customer_invoice_router
     from corpmind.modules.trainer_intel.api import router as trainer_router
     from corpmind.modules.social.api import router as social_router
 
@@ -204,6 +205,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(training_trainers_feedback_router, prefix="/api/v1/trainers", tags=["training"])
     app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
     app.include_router(billing_router, prefix="/api/v1/billing", tags=["billing"])
+    app.include_router(customer_invoice_router, prefix="/api/v1/customers", tags=["billing"])
     app.include_router(social_router, prefix="/api/v1/social", tags=["social"])
     app.include_router(booking_webhook_router, prefix="/api/v1/webhooks", tags=["webhooks"])
     app.include_router(whatsapp_router, prefix="/api/v1/whatsapp", tags=["whatsapp"])

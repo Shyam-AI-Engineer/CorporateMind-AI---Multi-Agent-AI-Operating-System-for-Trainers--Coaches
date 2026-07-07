@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import DateTime, Float, Integer, String, func
+from sqlalchemy import Date, DateTime, Float, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,3 +40,27 @@ class UsageMeter(TenantBase):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class CustomerInvoice(TenantBase):
+    """Manual customer invoice. Created and transitioned by staff; no payment gateway."""
+
+    __tablename__ = "customer_invoices"
+
+    # status: draft | issued | paid | cancelled | overdue
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
+    customer_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
+    invoice_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    invoice_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    tax_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(10), nullable=True, default="INR")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    renewal_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True, index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

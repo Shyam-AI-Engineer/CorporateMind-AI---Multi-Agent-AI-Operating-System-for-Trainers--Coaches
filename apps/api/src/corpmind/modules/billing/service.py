@@ -3,15 +3,34 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from corpmind.core.exceptions import NotFoundError
-from corpmind.modules.billing.models import Subscription, UsageMeter
-from corpmind.modules.billing.repo import SubscriptionRepo, UsageMeterRepo
-from corpmind.modules.billing.schemas import BillingSummaryOut, SubscriptionOut, UsageSummary
+from corpmind.core.exceptions import NotFoundError, ValidationError
+from corpmind.core.redis import get_redis
+from corpmind.core.tenancy import get_tenant_context
+from corpmind.modules.billing.events import (
+    InvoiceCancelled,
+    InvoiceCreated,
+    InvoiceIssued,
+    InvoicePaid,
+)
+from corpmind.modules.billing.models import CustomerInvoice, Subscription, UsageMeter
+from corpmind.modules.billing.repo import CustomerInvoiceRepo, SubscriptionRepo, UsageMeterRepo
+from corpmind.modules.billing.schemas import (
+    BillingSummaryOut,
+    CustomerInvoiceCreate,
+    CustomerInvoiceFilters,
+    CustomerInvoiceListOut,
+    CustomerInvoiceOut,
+    CustomerInvoiceUpdate,
+    InvoiceKPIsOut,
+    MarkInvoicePaid,
+    SubscriptionOut,
+    UsageSummary,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -102,3 +121,374 @@ def _build_usage_summary(sub: Subscription, meter: UsageMeter | None) -> UsageSu
         ai_budget_inr=sub.ai_budget_inr,
         budget_utilization_pct=pct,
     )
+
+
+# ── Invoice cache key helpers ─────────────────────────────────────────────────
+
+_INVOICE_LIST_TTL = 300
+_INVOICE_DETAIL_TTL = 300
+_INVOICE_KPIS_TTL = 300
+
+# Status-machine constants
+_ISSUEABLES = frozenset({"draft"})
+_PAYABLE_FROM = frozenset({"issued"})
+_CANCELLABLE_FROM = frozenset({"draft", "issued", "overdue"})
+
+
+def _invoice_list_key(org_id: uuid.UUID, ws_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{ws_id}:billing:invoices:list"
+
+
+def _invoice_detail_key(org_id: uuid.UUID, record_id: uuid.UUID) -> str:
+    return f"t:{org_id}:billing:invoices:detail:{record_id}"
+
+
+def _invoice_kpis_key(org_id: uuid.UUID, ws_id: uuid.UUID) -> str:
+    return f"t:{org_id}:{ws_id}:billing:invoices:kpis"
+
+
+# ── CustomerInvoiceService ────────────────────────────────────────────────────
+
+class CustomerInvoiceService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._repo = CustomerInvoiceRepo(session)
+
+    async def create(self, req: CustomerInvoiceCreate) -> CustomerInvoiceOut:
+        ctx = get_tenant_context()
+
+        if req.invoice_number:
+            existing = await self._repo.find_by_invoice_number(
+                ctx.org_id, req.invoice_number
+            )
+            if existing:
+                raise ValidationError(
+                    f"Invoice number '{req.invoice_number}' already exists for this tenant"
+                )
+
+        now = datetime.now(UTC)
+        record = CustomerInvoice(
+            id=uuid.uuid4(),
+            tenant_id=ctx.org_id,
+            workspace_id=req.workspace_id,
+            customer_id=req.customer_id,
+            invoice_number=req.invoice_number,
+            invoice_date=req.invoice_date,
+            due_date=req.due_date,
+            amount=req.amount,
+            tax_amount=req.tax_amount,
+            total_amount=req.total_amount,
+            currency=req.currency,
+            status="draft",
+            payment_date=None,
+            renewal_id=req.renewal_id,
+            notes=req.notes,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._repo.create(record)
+        await self._session.commit()
+        await self._bust_list_cache(ctx.org_id, req.workspace_id)
+        await self._bust_kpis_cache(ctx.org_id, req.workspace_id)
+
+        log.info(
+            "billing.invoice.created",
+            invoice_id=str(record.id),
+            customer_id=str(req.customer_id),
+            tenant_id=str(ctx.org_id),
+        )
+        event = InvoiceCreated(
+            invoice_id=record.id,
+            tenant_id=ctx.org_id,
+            workspace_id=req.workspace_id,
+            customer_id=req.customer_id,
+            invoice_number=req.invoice_number,
+        )
+        log.debug("billing.invoice.event", event_type=event.__class__.__name__)
+        return CustomerInvoiceOut.model_validate(record)
+
+    async def update(
+        self, record_id: uuid.UUID, req: CustomerInvoiceUpdate
+    ) -> CustomerInvoiceOut:
+        ctx = get_tenant_context()
+        record = await self._repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Invoice {record_id} not found")
+        if record.status not in {"draft"}:
+            raise ValidationError(
+                f"Invoice in status '{record.status}' cannot be updated; only draft invoices are editable"
+            )
+
+        if req.invoice_number and req.invoice_number != record.invoice_number:
+            existing = await self._repo.find_by_invoice_number(
+                ctx.org_id, req.invoice_number
+            )
+            if existing and existing.id != record_id:
+                raise ValidationError(
+                    f"Invoice number '{req.invoice_number}' already exists for this tenant"
+                )
+
+        changes: dict = {}
+        if req.invoice_number is not None:
+            changes["invoice_number"] = req.invoice_number
+        if req.invoice_date is not None:
+            changes["invoice_date"] = req.invoice_date
+        if req.due_date is not None:
+            changes["due_date"] = req.due_date
+        if req.amount is not None:
+            changes["amount"] = req.amount
+        if req.tax_amount is not None:
+            changes["tax_amount"] = req.tax_amount
+        if req.total_amount is not None:
+            changes["total_amount"] = req.total_amount
+        if req.currency is not None:
+            changes["currency"] = req.currency
+        if req.notes is not None:
+            changes["notes"] = req.notes
+        changes["updated_at"] = datetime.now(UTC)
+
+        await self._repo.update_fields(record_id, **changes)
+        await self._session.commit()
+        updated = await self._repo.find_by_id(record_id)
+        assert updated is not None
+
+        await self._bust_detail_cache(ctx.org_id, record_id)
+        await self._bust_list_cache(ctx.org_id, updated.workspace_id)
+        log.info("billing.invoice.updated", invoice_id=str(record_id), tenant_id=str(ctx.org_id))
+        return CustomerInvoiceOut.model_validate(updated)
+
+    async def issue(self, record_id: uuid.UUID) -> CustomerInvoiceOut:
+        ctx = get_tenant_context()
+        record = await self._repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Invoice {record_id} not found")
+        if record.status not in _ISSUEABLES:
+            raise ValidationError(
+                f"Invoice in status '{record.status}' cannot be issued; must be draft"
+            )
+
+        await self._repo.update_fields(
+            record_id, status="issued", updated_at=datetime.now(UTC)
+        )
+        await self._session.commit()
+        updated = await self._repo.find_by_id(record_id)
+        assert updated is not None
+
+        await self._bust_detail_cache(ctx.org_id, record_id)
+        await self._bust_list_cache(ctx.org_id, updated.workspace_id)
+        await self._bust_kpis_cache(ctx.org_id, updated.workspace_id)
+
+        event = InvoiceIssued(
+            invoice_id=record_id,
+            tenant_id=ctx.org_id,
+            customer_id=updated.customer_id,
+            total_amount=updated.total_amount,
+        )
+        log.info("billing.invoice.issued", invoice_id=str(record_id), tenant_id=str(ctx.org_id))
+        log.debug("billing.invoice.event", event_type=event.__class__.__name__)
+        return CustomerInvoiceOut.model_validate(updated)
+
+    async def mark_paid(
+        self, record_id: uuid.UUID, req: MarkInvoicePaid
+    ) -> CustomerInvoiceOut:
+        ctx = get_tenant_context()
+        record = await self._repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Invoice {record_id} not found")
+        if record.status not in _PAYABLE_FROM:
+            raise ValidationError(
+                f"Invoice in status '{record.status}' cannot be marked paid; must be issued"
+            )
+
+        await self._repo.update_fields(
+            record_id,
+            status="paid",
+            payment_date=req.payment_date,
+            updated_at=datetime.now(UTC),
+        )
+        await self._session.commit()
+        updated = await self._repo.find_by_id(record_id)
+        assert updated is not None
+
+        await self._bust_detail_cache(ctx.org_id, record_id)
+        await self._bust_list_cache(ctx.org_id, updated.workspace_id)
+        await self._bust_kpis_cache(ctx.org_id, updated.workspace_id)
+
+        event = InvoicePaid(
+            invoice_id=record_id,
+            tenant_id=ctx.org_id,
+            customer_id=updated.customer_id,
+            payment_date=req.payment_date,
+            total_amount=updated.total_amount,
+        )
+        log.info(
+            "billing.invoice.paid",
+            invoice_id=str(record_id),
+            payment_date=str(req.payment_date),
+            tenant_id=str(ctx.org_id),
+        )
+        log.debug("billing.invoice.event", event_type=event.__class__.__name__)
+        return CustomerInvoiceOut.model_validate(updated)
+
+    async def cancel(self, record_id: uuid.UUID) -> CustomerInvoiceOut:
+        ctx = get_tenant_context()
+        record = await self._repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Invoice {record_id} not found")
+        if record.status not in _CANCELLABLE_FROM:
+            raise ValidationError(
+                f"Invoice in status '{record.status}' cannot be cancelled"
+            )
+
+        await self._repo.update_fields(
+            record_id, status="cancelled", updated_at=datetime.now(UTC)
+        )
+        await self._session.commit()
+        updated = await self._repo.find_by_id(record_id)
+        assert updated is not None
+
+        await self._bust_detail_cache(ctx.org_id, record_id)
+        await self._bust_list_cache(ctx.org_id, updated.workspace_id)
+        await self._bust_kpis_cache(ctx.org_id, updated.workspace_id)
+
+        event = InvoiceCancelled(
+            invoice_id=record_id,
+            tenant_id=ctx.org_id,
+            customer_id=updated.customer_id,
+        )
+        log.info("billing.invoice.cancelled", invoice_id=str(record_id), tenant_id=str(ctx.org_id))
+        log.debug("billing.invoice.event", event_type=event.__class__.__name__)
+        return CustomerInvoiceOut.model_validate(updated)
+
+    async def get(self, record_id: uuid.UUID) -> CustomerInvoiceOut:
+        ctx = get_tenant_context()
+        redis = get_redis()
+        key = _invoice_detail_key(ctx.org_id, record_id)
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return CustomerInvoiceOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        record = await self._repo.find_by_id(record_id)
+        if not record:
+            raise NotFoundError(f"Invoice {record_id} not found")
+
+        out = CustomerInvoiceOut.model_validate(record)
+        try:
+            await redis.set(key, out.model_dump_json(), ex=_INVOICE_DETAIL_TTL)
+        except Exception:
+            pass
+        return out
+
+    async def list(self, filters: CustomerInvoiceFilters) -> CustomerInvoiceListOut:
+        ctx = get_tenant_context()
+        redis = get_redis()
+
+        _is_default = (
+            filters.customer_id is None
+            and filters.status is None
+            and filters.invoice_date_from is None
+            and filters.invoice_date_to is None
+            and filters.due_date_from is None
+            and filters.due_date_to is None
+            and filters.renewal_id is None
+            and filters.search is None
+            and filters.cursor is None
+            and filters.limit == 50
+        )
+        if _is_default:
+            key = _invoice_list_key(ctx.org_id, filters.workspace_id)
+            try:
+                cached = await redis.get(key)
+                if cached:
+                    return CustomerInvoiceListOut.model_validate_json(cached)
+            except Exception:
+                pass
+
+        total = await self._repo.count(
+            filters.workspace_id,
+            customer_id=filters.customer_id,
+            status=filters.status,
+            invoice_date_from=filters.invoice_date_from,
+            invoice_date_to=filters.invoice_date_to,
+            due_date_from=filters.due_date_from,
+            due_date_to=filters.due_date_to,
+            renewal_id=filters.renewal_id,
+            search=filters.search,
+        )
+        rows = await self._repo.list_page(
+            filters.workspace_id,
+            customer_id=filters.customer_id,
+            status=filters.status,
+            invoice_date_from=filters.invoice_date_from,
+            invoice_date_to=filters.invoice_date_to,
+            due_date_from=filters.due_date_from,
+            due_date_to=filters.due_date_to,
+            renewal_id=filters.renewal_id,
+            search=filters.search,
+            cursor=filters.cursor,
+            limit=filters.limit,
+        )
+        has_more = len(rows) > filters.limit
+        page = rows[: filters.limit]
+
+        from corpmind.modules.billing.repo import _encode_invoice_cursor
+        next_cursor = (
+            _encode_invoice_cursor(page[-1].created_at, page[-1].id) if has_more else None
+        )
+
+        out = CustomerInvoiceListOut(
+            items=[CustomerInvoiceOut.model_validate(r) for r in page],
+            next_cursor=next_cursor,
+            has_more=has_more,
+            total=total,
+        )
+        if _is_default:
+            try:
+                await redis.set(key, out.model_dump_json(), ex=_INVOICE_LIST_TTL)
+            except Exception:
+                pass
+        return out
+
+    async def get_kpis(self, workspace_id: uuid.UUID) -> InvoiceKPIsOut:
+        ctx = get_tenant_context()
+        redis = get_redis()
+        key = _invoice_kpis_key(ctx.org_id, workspace_id)
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return InvoiceKPIsOut.model_validate_json(cached)
+        except Exception:
+            pass
+
+        kpis = await self._repo.fetch_kpis(workspace_id)
+        try:
+            await redis.set(key, kpis.model_dump_json(), ex=_INVOICE_KPIS_TTL)
+        except Exception:
+            pass
+        return kpis
+
+    # ── Cache helpers ─────────────────────────────────────────────────────────
+
+    async def _bust_detail_cache(self, org_id: uuid.UUID, record_id: uuid.UUID) -> None:
+        redis = get_redis()
+        try:
+            await redis.delete(_invoice_detail_key(org_id, record_id))
+        except Exception:
+            pass
+
+    async def _bust_list_cache(self, org_id: uuid.UUID, ws_id: uuid.UUID) -> None:
+        redis = get_redis()
+        try:
+            await redis.delete(_invoice_list_key(org_id, ws_id))
+        except Exception:
+            pass
+
+    async def _bust_kpis_cache(self, org_id: uuid.UUID, ws_id: uuid.UUID) -> None:
+        redis = get_redis()
+        try:
+            await redis.delete(_invoice_kpis_key(org_id, ws_id))
+        except Exception:
+            pass
