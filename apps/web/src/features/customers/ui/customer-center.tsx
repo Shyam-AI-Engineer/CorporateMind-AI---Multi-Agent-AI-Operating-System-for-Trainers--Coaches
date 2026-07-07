@@ -25,6 +25,7 @@ import { HealthBadge, RiskBadge, CustomerSuccessSummary } from "@/features/custo
 import { RenewalTable, RenewalDialog } from "@/features/customers/ui/renewal-center";
 import { useRenewalsByCustomer, useCreateCustomerRenewal } from "@/features/customers/api/use-renewal";
 import type { CustomerRenewal } from "@/features/customers/types-renewal";
+import { Customer360Tab, CustomerTimeline } from "@/features/customers/ui/customer-timeline";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -282,7 +283,7 @@ function DetailDrawer({
   onArchive,
   onHealthChange,
 }: DetailDrawerProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "renewals">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "renewals" | "timeline" | "360">("overview");
   return (
     <div
       data-testid="detail-drawer"
@@ -298,25 +299,47 @@ function DetailDrawer({
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b mb-4" data-testid="drawer-tabs">
+      <div className="flex border-b mb-4 overflow-x-auto" data-testid="drawer-tabs">
         <button
           data-testid="tab-overview"
           onClick={() => setActiveTab("overview")}
-          className={`px-4 py-2 text-sm ${activeTab === "overview" ? "border-b-2 border-blue-600 font-medium" : "text-muted-foreground"}`}
+          className={`px-4 py-2 text-sm whitespace-nowrap ${activeTab === "overview" ? "border-b-2 border-blue-600 font-medium" : "text-muted-foreground"}`}
         >
           Overview
         </button>
         <button
           data-testid="tab-renewals"
           onClick={() => setActiveTab("renewals")}
-          className={`px-4 py-2 text-sm ${activeTab === "renewals" ? "border-b-2 border-blue-600 font-medium" : "text-muted-foreground"}`}
+          className={`px-4 py-2 text-sm whitespace-nowrap ${activeTab === "renewals" ? "border-b-2 border-blue-600 font-medium" : "text-muted-foreground"}`}
         >
           Renewals
+        </button>
+        <button
+          data-testid="tab-timeline"
+          onClick={() => setActiveTab("timeline")}
+          className={`px-4 py-2 text-sm whitespace-nowrap ${activeTab === "timeline" ? "border-b-2 border-blue-600 font-medium" : "text-muted-foreground"}`}
+        >
+          Timeline
+        </button>
+        <button
+          data-testid="tab-360"
+          onClick={() => setActiveTab("360")}
+          className={`px-4 py-2 text-sm whitespace-nowrap ${activeTab === "360" ? "border-b-2 border-blue-600 font-medium" : "text-muted-foreground"}`}
+        >
+          360°
         </button>
       </div>
 
       {activeTab === "renewals" && (
         <CustomerRenewalsTab customerId={customer.id} workspaceId={workspaceId} />
+      )}
+
+      {activeTab === "timeline" && (
+        <CustomerTimeline customerId={customer.id} workspaceId={workspaceId} />
+      )}
+
+      {activeTab === "360" && (
+        <Customer360Tab customerId={customer.id} workspaceId={workspaceId} />
       )}
 
       {activeTab === "overview" && (

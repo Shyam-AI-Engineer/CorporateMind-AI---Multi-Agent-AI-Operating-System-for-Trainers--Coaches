@@ -170,6 +170,7 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.customer_success.api import customer_success_router as customers_success_sub_router
     from corpmind.modules.customer_renewals.api import router as customer_renewals_router
     from corpmind.modules.customer_renewals.api import customer_renewal_router as customers_renewal_sub_router
+    from corpmind.modules.customer_success.timeline_api import router as customer_timeline_router
     from corpmind.modules.training.api import router as training_router
     from corpmind.modules.training.api import sessions_router as training_sessions_router
     from corpmind.modules.training.api import attendance_router as training_attendance_router
@@ -192,6 +193,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(customers_success_sub_router, prefix="/api/v1/customers", tags=["customer-success"])
     app.include_router(customer_renewals_router, prefix="/api/v1/customer-renewals", tags=["customer-renewals"])
     app.include_router(customers_renewal_sub_router, prefix="/api/v1/customers", tags=["customer-renewals"])
+    app.include_router(customer_timeline_router, prefix="/api/v1", tags=["customer-360"])
     app.include_router(training_router, prefix="/api/v1/training-engagements", tags=["training"])
     app.include_router(training_sessions_router, prefix="/api/v1/training-sessions", tags=["training"])
     app.include_router(training_attendance_router, prefix="/api/v1/training-attendance", tags=["training"])
