@@ -178,6 +178,7 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.training.api import feedback_router as training_feedback_router
     from corpmind.modules.training.api import customers_feedback_router as training_customers_feedback_router
     from corpmind.modules.training.api import trainers_feedback_router as training_trainers_feedback_router
+    from corpmind.modules.executive_dashboard.api import router as executive_dashboard_router
 
     app.include_router(identity_router, prefix="/api/v1/identity", tags=["identity"])
     app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["inbox"])
@@ -219,6 +220,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(workflow_sla_router, prefix="/api/v1/workflow-sla", tags=["workflow-sla"])
     app.include_router(workflow_effectiveness_router, prefix="/api/v1/workflow-effectiveness", tags=["workflow-effectiveness"])
     app.include_router(workflow_observability_router, prefix="/api/v1/workflow-observability", tags=["workflow-observability"])
+    app.include_router(executive_dashboard_router, prefix="/api/v1/executive-dashboard", tags=["executive-dashboard"])
 
     # Health check (no auth required)
     from fastapi import APIRouter
