@@ -182,6 +182,7 @@ def _register_routers(app: FastAPI) -> None:
     from corpmind.modules.executive_dashboard.api import router as executive_dashboard_router
     from corpmind.modules.audit.api import router as audit_router
     from corpmind.modules.admin.api import router as admin_router
+    from corpmind.modules.integrations.api import router as integrations_router
 
     app.include_router(identity_router, prefix="/api/v1/identity", tags=["identity"])
     app.include_router(inbox_router, prefix="/api/v1/inbox", tags=["inbox"])
@@ -227,6 +228,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(executive_dashboard_router, prefix="/api/v1/executive-dashboard", tags=["executive-dashboard"])
     app.include_router(audit_router, prefix="/api/v1/audit", tags=["audit"])
     app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
+    app.include_router(integrations_router, prefix="/api/v1/integrations", tags=["integrations"])
 
     # Health check (no auth required)
     from fastapi import APIRouter
