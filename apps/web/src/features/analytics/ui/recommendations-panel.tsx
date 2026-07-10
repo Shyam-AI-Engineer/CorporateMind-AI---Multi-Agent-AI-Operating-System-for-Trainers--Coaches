@@ -86,7 +86,7 @@ export function RecommendationsPanel({ workspaceId }: { workspaceId: string }) {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" data-testid="recommendations-panel">
         {Array.from({ length: 3 }).map((_, i) => (
           <Skeleton key={i} className="h-36 w-full rounded-lg" />
         ))}
@@ -96,7 +96,7 @@ export function RecommendationsPanel({ workspaceId }: { workspaceId: string }) {
 
   if (isError) {
     return (
-      <div className="flex items-center gap-2 text-sm text-destructive">
+      <div className="flex items-center gap-2 text-sm text-destructive" data-testid="recommendations-panel">
         <AlertCircle className="h-4 w-4 shrink-0" />
         Failed to load recommendations. Try refreshing.
       </div>
@@ -107,7 +107,7 @@ export function RecommendationsPanel({ workspaceId }: { workspaceId: string }) {
   const suppressed = data?.suppressed_count ?? 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="recommendations-panel">
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 pb-2">
           <Lightbulb className="h-4 w-4 text-amber-500" />

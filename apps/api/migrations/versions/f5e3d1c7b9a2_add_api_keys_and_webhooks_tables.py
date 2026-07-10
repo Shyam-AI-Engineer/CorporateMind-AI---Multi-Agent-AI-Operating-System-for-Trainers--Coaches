@@ -1,6 +1,6 @@
 """Add api_keys and webhooks tables — Sprint 55: Integration Hub.
 
-Revision ID: f1a3b5c7d9e2
+Revision ID: f5e3d1c7b9a2
 Revises: e9f1a3b5c7d0
 Create Date: 2026-07-08 11:00:00.000000
 
@@ -13,7 +13,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PgUUID
 
-revision: str = "f1a3b5c7d9e2"
+revision: str = "f5e3d1c7b9a2"
 down_revision: str = "e9f1a3b5c7d0"
 branch_labels = None
 depends_on = None

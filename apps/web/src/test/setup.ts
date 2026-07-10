@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import "@testing-library/jest-dom";
 
 // Mock next/navigation globally so components importing useRouter don't crash.
 vi.mock("next/navigation", () => ({

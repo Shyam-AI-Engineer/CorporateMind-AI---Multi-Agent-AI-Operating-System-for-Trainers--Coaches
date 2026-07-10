@@ -3580,8 +3580,8 @@ class RecommendationActionService:
         if snap is None:
             raise ValueError(f"recommendation {recommendation_id} not found")
 
-    async def _invalidate_cache(self, tenant_id: uuid.UUID, workspace_id: uuid.UUID) -> None:
-        cache_key = f"t:{tenant_id}:{workspace_id}:analytics:recommendation_actions"
+    async def _invalidate_cache(self, org_id: uuid.UUID, workspace_id: uuid.UUID) -> None:
+        cache_key = f"t:{org_id}:{workspace_id}:analytics:recommendation_actions"
         try:
             await get_redis().delete(cache_key)
         except Exception:
@@ -3821,9 +3821,9 @@ class RecommendationExecutionService:
         return row
 
     async def _invalidate_queue_cache(
-        self, tenant_id: uuid.UUID, workspace_id: uuid.UUID
+        self, org_id: uuid.UUID, workspace_id: uuid.UUID
     ) -> None:
-        cache_key = f"t:{tenant_id}:{workspace_id}:analytics:recommendation_work_queue"
+        cache_key = f"t:{org_id}:{workspace_id}:analytics:recommendation_work_queue"
         try:
             await get_redis().delete(cache_key)
         except Exception:

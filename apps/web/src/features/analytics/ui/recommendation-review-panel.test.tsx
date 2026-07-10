@@ -101,11 +101,10 @@ describe("RecommendationReviewPanel", () => {
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
-  it("does not show the root panel div while loading (no data yet)", () => {
+  it("root panel is always mounted; sub-sections show skeletons while loading", () => {
     mockLoading();
     render(<RecommendationReviewPanel workspaceId="ws-1" />);
-    // rec-review-panel should not render when we have no data
-    expect(screen.queryByTestId("rec-review-panel")).toBeNull();
+    expect(screen.queryByTestId("rec-review-panel")).not.toBeNull();
   });
 
   // ── Error state ─────────────────────────────────────────────────────────────

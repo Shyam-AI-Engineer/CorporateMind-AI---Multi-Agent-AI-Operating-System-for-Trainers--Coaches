@@ -9,8 +9,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-
 from corpmind.core.config import settings
 from corpmind.core.database import close_db, init_db
 from corpmind.core.exceptions import CorporateMindError
@@ -80,7 +78,7 @@ async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResp
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Initialize and teardown application resources."""
     configure_logging()
     configure_sentry()
@@ -100,7 +98,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CorporateMind AI",
-        version="0.1.0",
+        version="1.0.0",
         docs_url="/docs" if settings.APP_DEBUG else None,
         redoc_url="/redoc" if settings.APP_DEBUG else None,
         lifespan=lifespan,
@@ -111,7 +109,7 @@ def create_app() -> FastAPI:
     # TenantMiddleware bypasses OPTIONS so CORSMiddleware can handle preflights.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[str(o) for o in settings.APP_ALLOWED_HOSTS],
+        allow_origins=list(settings.APP_ALLOWED_HOSTS),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -249,8 +247,8 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(health)
 
     # Admin routes (platform admin only, separate prefix)
-    from corpmind.modules.identity.admin_api import router as admin_router
-    app.include_router(admin_router, prefix="/admin/v1", tags=["admin"])
+    from corpmind.modules.identity.admin_api import router as platform_admin_router
+    app.include_router(platform_admin_router, prefix="/admin/v1", tags=["platform-admin"])
 
 
 app = create_app()

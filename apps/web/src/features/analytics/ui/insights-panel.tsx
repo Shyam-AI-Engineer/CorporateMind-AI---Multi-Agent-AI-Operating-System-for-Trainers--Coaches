@@ -58,7 +58,7 @@ export function InsightsPanel({ workspaceId }: { workspaceId: string }) {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" data-testid="insights-panel">
         <Skeleton className="h-24 w-full rounded-lg" />
         <Skeleton className="h-36 w-full rounded-lg" />
         <Skeleton className="h-24 w-full rounded-lg" />
@@ -68,7 +68,7 @@ export function InsightsPanel({ workspaceId }: { workspaceId: string }) {
 
   if (isError) {
     return (
-      <div className="flex items-center gap-2 text-sm text-destructive">
+      <div className="flex items-center gap-2 text-sm text-destructive" data-testid="insights-panel">
         <AlertCircle className="h-4 w-4 shrink-0" />
         Failed to load insights. Try refreshing.
       </div>
@@ -76,7 +76,7 @@ export function InsightsPanel({ workspaceId }: { workspaceId: string }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="insights-panel">
       {/* Executive summary */}
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 pb-2">

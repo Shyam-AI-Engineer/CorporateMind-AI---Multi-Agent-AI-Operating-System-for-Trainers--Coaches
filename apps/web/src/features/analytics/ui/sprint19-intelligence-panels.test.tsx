@@ -104,8 +104,8 @@ describe("CampaignROIPanel", () => {
     mockCampaignROI.mockReturnValue({ data: roi, isLoading: false, isError: false } as ReturnType<typeof useCampaignROI>);
     render(<CampaignROIPanel workspaceId={WS} />);
     expect(screen.getByText("Low data")).not.toBeNull();
-    // avg_days shown as dash when null
-    expect(screen.getByText("—")).not.toBeNull();
+    // avg_days shown as dash when null (multiple dashes may appear for other null fields)
+    expect(screen.getAllByText("—")[0]).not.toBeNull();
   });
 
   it("shows error state on failure", () => {
@@ -284,6 +284,6 @@ describe("PricingCalibrationCard", () => {
     mockPricing.mockReturnValue({ data, isLoading: false, isError: false } as ReturnType<typeof usePricingCalibration>);
     render(<PricingCalibrationCard workspaceId={WS} />);
     // The "—" dash should appear for the null avg_days_to_accept value
-    expect(screen.getByText("—")).not.toBeNull();
+    expect(screen.getAllByText("—")[0]).not.toBeNull();
   });
 });

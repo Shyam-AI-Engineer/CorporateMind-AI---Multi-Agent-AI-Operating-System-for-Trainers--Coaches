@@ -1,7 +1,7 @@
 """Sprint 59 — add bulk_operations table (expand-only).
 
 Revision ID: g1a2b3c4d5e6
-Revises: f6d2c4a8e1b7
+Revises: a1b3c5d7e9f2
 Create Date: 2026-07-09
 
 EXPAND-ONLY migration (no destructive changes to existing tables).
@@ -28,7 +28,7 @@ from sqlalchemy.dialects import postgresql as pg
 
 
 revision = "g1a2b3c4d5e6"
-down_revision = "f6d2c4a8e1b7"
+down_revision = "a1b3c5d7e9f2"
 branch_labels = None
 depends_on = None
 

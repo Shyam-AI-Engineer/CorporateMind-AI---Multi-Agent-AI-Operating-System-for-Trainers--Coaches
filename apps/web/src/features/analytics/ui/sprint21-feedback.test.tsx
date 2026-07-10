@@ -63,7 +63,9 @@ function makeEffectivenessData(
     workspace_id: WORKSPACE_ID,
     period_days: 30,
     generated_at: new Date().toISOString(),
-    by_type: [],
+    by_type: overallScore !== null
+      ? [{ recommendation_type: "industry", generated: 5, acted: 2, successful: 1, adoption_rate: 0.4, success_rate: 0.5, quality_score: overallScore }]
+      : [],
     overall_quality_score: overallScore,
   };
 }
