@@ -29,6 +29,7 @@ from corpmind.modules.analytics.models import AnalyticsDaily  # noqa: F401
 from corpmind.modules.billing.models import Subscription, UsageMeter  # noqa: F401
 from corpmind.ai.models import ModelRun  # noqa: F401
 from corpmind.modules.inbox.models import InboxConnection, InboxMessage  # noqa: F401
+from corpmind.modules.bulk_operations.models import BulkOperation  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
