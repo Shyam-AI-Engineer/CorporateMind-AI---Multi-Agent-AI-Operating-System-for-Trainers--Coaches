@@ -113,6 +113,25 @@ class Settings(BaseSettings):
     AI_DEFAULT_BUDGET_INR: float = 400.0
     AI_SEMANTIC_CACHE_THRESHOLD: float = 0.96
 
+    # ── Rate Limiting (IP-based, Redis-backed) ────────────────────────────────
+    # Per-scope overrides — set to 0 to disable a specific scope.
+    RATE_LIMIT_DEFAULT_MAX: int = 60          # generic fallback
+    RATE_LIMIT_DEFAULT_WINDOW: int = 60       # seconds
+    RATE_LIMIT_LOGIN_MAX: int = 10            # 10 attempts per window
+    RATE_LIMIT_LOGIN_WINDOW: int = 900        # 15 minutes
+    RATE_LIMIT_REGISTER_MAX: int = 5          # 5 registrations per window
+    RATE_LIMIT_REGISTER_WINDOW: int = 3600    # 1 hour
+    RATE_LIMIT_API_KEY_MAX: int = 20          # 20 API-key creates per window
+    RATE_LIMIT_API_KEY_WINDOW: int = 3600     # 1 hour
+    RATE_LIMIT_WEBHOOK_MAX: int = 30          # webhook-endpoint creates per window
+    RATE_LIMIT_WEBHOOK_WINDOW: int = 3600     # 1 hour
+
+    # ── Metrics Endpoint Security ─────────────────────────────────────────────
+    # Bearer token Prometheus uses when scraping /metrics.
+    # If empty in non-production: /metrics is open (dev convenience).
+    # Required to be non-empty in production (enforced by validator below).
+    METRICS_TOKEN: str = ""
+
     # ── Email Message-ID ──────────────────────────────────────────────────────
     # Domain used as the right-hand side of SMTP Message-ID headers.
     # Format: <ULID@MAIL_DOMAIN>  — e.g. <01ARZ3NDEKTSV4RRFFQ69G5FAV@corpmind.ai>
@@ -188,6 +207,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "INBOX_ENCRYPTION_KEY_V1 must be set in production. "
                 'Generate with: python -c "import os; print(os.urandom(32).hex())"'
+            )
+        return self
+
+    @model_validator(mode="after")
+    def ensure_metrics_token_in_production(self) -> "Settings":
+        if self.APP_ENV == "production" and not self.METRICS_TOKEN:
+            raise ValueError(
+                "METRICS_TOKEN must be set in production to secure the /metrics endpoint. "
+                'Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
         return self
 

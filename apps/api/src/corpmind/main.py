@@ -237,13 +237,10 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(bulk_operations_router, prefix="/api/v1/bulk", tags=["bulk-operations"])
 
     # Health check (no auth required)
+    from corpmind.core.health import healthz_handler
     from fastapi import APIRouter
     health = APIRouter()
-
-    @health.get("/healthz", include_in_schema=False)
-    async def healthz() -> dict[str, str]:
-        return {"status": "ok"}
-
+    health.add_api_route("/healthz", healthz_handler, methods=["GET"], include_in_schema=False)
     app.include_router(health)
 
     # Admin routes (platform admin only, separate prefix)

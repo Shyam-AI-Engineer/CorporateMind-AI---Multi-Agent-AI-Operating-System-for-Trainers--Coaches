@@ -71,6 +71,133 @@ _ENTITY_TABLES: dict[str, str] = {
     "workflow_templates": "workflow_templates",
 }
 
+# DB column names accepted from CSV per entity (whitelist guards against injection via unknown keys)
+_ALLOWED_INSERT_COLUMNS: dict[str, frozenset[str]] = {
+    "customers": frozenset({
+        "company_name", "display_name", "industry", "website", "email", "phone",
+        "address", "city", "state", "country", "postal_code", "company_size",
+        "annual_revenue_inr", "status", "health_status", "relationship_owner_id",
+        "primary_contact_name", "primary_contact_email", "primary_contact_phone", "notes",
+    }),
+    "training_engagements": frozenset({
+        "customer_id", "program_name", "description", "training_type", "delivery_mode",
+        "status", "priority", "planned_start_date", "planned_end_date",
+        "actual_start_date", "actual_end_date", "estimated_participants",
+        "actual_participants", "assigned_trainer_id", "coordinator_id",
+        "location", "meeting_link", "notes",
+    }),
+    "business_tasks": frozenset({
+        "title", "description", "priority", "status", "assignee",
+        "assigned_user_id", "due_date", "created_by", "source_type",
+    }),
+    "workflow_templates": frozenset({
+        "name", "description", "category", "is_active",
+    }),
+}
+
+# CSV field name → DB column name for fields that differ between the two
+_CSV_TO_DB_RENAME: dict[str, dict[str, str]] = {
+    "customers": {},
+    "training_engagements": {
+        "title": "program_name",
+        "start_date": "planned_start_date",
+    },
+    "business_tasks": {},
+    "workflow_templates": {},
+}
+
+# Defaults applied before CSV values; CSV wins on conflict
+_INSERT_DEFAULTS: dict[str, dict[str, Any]] = {
+    "customers": {"status": "active", "health_status": "healthy"},
+    "training_engagements": {
+        "training_type": "imported",
+        "delivery_mode": "other",
+        "status": "planned",
+        "priority": "medium",
+    },
+    "business_tasks": {
+        "status": "open",
+        "priority": "medium",
+        "created_by": "bulk_import",
+    },
+    "workflow_templates": {
+        "category": "imported",
+        "is_active": True,
+    },
+}
+
+# Fixed ordered column list for each entity's INSERT (defines shape of every row written)
+_ALL_INSERT_COLUMNS: dict[str, tuple[str, ...]] = {
+    "customers": (
+        "id", "tenant_id", "workspace_id",
+        "company_name", "display_name", "industry", "website", "email", "phone",
+        "address", "city", "state", "country", "postal_code", "company_size",
+        "annual_revenue_inr", "status", "health_status", "relationship_owner_id",
+        "primary_contact_name", "primary_contact_email", "primary_contact_phone",
+        "notes", "created_at", "updated_at",
+    ),
+    "training_engagements": (
+        "id", "tenant_id", "workspace_id",
+        "customer_id", "program_name", "description", "training_type", "delivery_mode",
+        "status", "priority", "planned_start_date", "planned_end_date",
+        "actual_start_date", "actual_end_date", "estimated_participants",
+        "actual_participants", "assigned_trainer_id", "coordinator_id",
+        "location", "meeting_link", "notes", "created_at", "updated_at",
+    ),
+    "business_tasks": (
+        "id", "tenant_id", "workspace_id",
+        "title", "description", "priority", "status", "assignee",
+        "assigned_user_id", "due_date", "created_by", "source_type",
+        "created_at", "updated_at",
+    ),
+    "workflow_templates": (
+        "id", "tenant_id", "workspace_id",
+        "name", "description", "category", "is_active", "created_by", "created_at",
+    ),
+}
+
+
+# ── Entity row construction ───────────────────────────────────────────────────
+
+def _build_entity_values(
+    row: dict[str, Any],
+    entity_type: str,
+    tenant_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    requested_by: uuid.UUID,
+    now: datetime,
+) -> dict[str, Any]:
+    """Map a validated CSV row to a complete DB column dict ready for INSERT."""
+    rename = _CSV_TO_DB_RENAME[entity_type]
+    allowed = _ALLOWED_INSERT_COLUMNS[entity_type]
+    values: dict[str, Any] = {**_INSERT_DEFAULTS[entity_type]}
+
+    for csv_col, val in row.items():
+        db_col = rename.get(csv_col, csv_col)
+        if db_col in allowed:
+            values[db_col] = val
+
+    # workflow_templates: CSV status (active/inactive/draft) → is_active bool;
+    # created_by is always the requesting user (UUID, not a string label)
+    if entity_type == "workflow_templates":
+        if "status" in row:
+            values["is_active"] = row["status"] == "active"
+        values["created_by"] = str(requested_by)
+
+    # System-generated fields always override anything from CSV
+    values["id"] = str(uuid.uuid4())
+    values["tenant_id"] = str(tenant_id)
+    values["workspace_id"] = str(workspace_id)
+    values["created_at"] = now.isoformat()
+    if entity_type != "workflow_templates":
+        values["updated_at"] = now.isoformat()
+
+    # Fill None for every optional column not present in this row
+    for col in _ALL_INSERT_COLUMNS[entity_type]:
+        values.setdefault(col, None)
+
+    return {col: values[col] for col in _ALL_INSERT_COLUMNS[entity_type]}
+
 
 # ── CSV row validation ────────────────────────────────────────────────────────
 
@@ -181,9 +308,17 @@ class BulkOperationService:
     # ── CSV Import ────────────────────────────────────────────────────────────
 
     async def import_csv(self, req: CsvImportRequest) -> BulkOperationOut:
-        """Validate then synchronously import rows. Creates a BulkOperation record."""
+        """Validate then synchronously import rows. Creates a BulkOperation record.
+
+        Flow:
+          1. Validate every row; collect valid rows for insertion.
+          2. INSERT valid rows inside a savepoint so a SQL failure can't corrupt
+             the BulkOperation tracking record.
+          3. Update BulkOperation with final counters and status.
+        """
         ctx = get_tenant_context()
         await self._invalidate_history_cache(ctx.org_id, req.workspace_id)
+        now = datetime.now(UTC)
 
         op = BulkOperation(
             id=uuid.uuid4(),
@@ -197,8 +332,8 @@ class BulkOperationService:
             processed_records=0,
             successful_records=0,
             failed_records=0,
-            started_at=datetime.now(UTC),
-            created_at=datetime.now(UTC),
+            started_at=now,
+            created_at=now,
         )
         op = await self._repo.create(op)
 
@@ -210,8 +345,9 @@ class BulkOperationService:
             total_rows=len(req.rows),
         )
 
+        # Phase 1: validate — collect valid rows, accumulate error messages
         validation_errors: list[str] = []
-        successful = 0
+        valid_rows: list[dict[str, Any]] = []
         failed = 0
         stop = False
 
@@ -230,19 +366,59 @@ class BulkOperationService:
                         stop = True
                         break
                 else:
-                    successful += 1
+                    valid_rows.append(result.data)
 
-        error_summary = "\n".join(validation_errors[:50]) if validation_errors else None
-        final_status = "failed" if (req.stop_on_error and failed > 0) else "completed"
+        # Phase 2: persist valid rows (skipped when stop_on_error aborted early)
+        inserted = 0
+        insert_error: str | None = None
+
+        if valid_rows and not (req.stop_on_error and failed > 0):
+            try:
+                async with self._session.begin_nested():
+                    inserted = await self._insert_entity_rows(
+                        req.entity_type,
+                        valid_rows,
+                        ctx.org_id,
+                        req.workspace_id,
+                        req.requested_by,
+                        now,
+                    )
+            except Exception as exc:
+                insert_error = str(exc)[:500]
+                log.error(
+                    "bulk_import_insert_failed",
+                    tenant_id=str(ctx.org_id),
+                    operation_id=str(op.id),
+                    entity_type=req.entity_type,
+                    error=insert_error,
+                )
+
+        # Phase 3: compute final counters and update tracking record
+        has_insert_error = insert_error is not None
+        successful = 0 if has_insert_error else inserted
+        # Treat valid rows as failed when the INSERT was rolled back
+        total_failed = failed + (len(valid_rows) if has_insert_error else 0)
+        processed = failed + len(valid_rows)
+
+        all_error_lines = list(validation_errors[:50])
+        if insert_error:
+            all_error_lines.append(f"Insert failed: {insert_error}")
+        error_summary = "\n".join(all_error_lines) if all_error_lines else None
+
+        final_status = (
+            "failed"
+            if has_insert_error or (req.stop_on_error and failed > 0)
+            else "completed"
+        )
 
         updated = await self._repo.update_fields(
             op.id,
             {
                 "status": final_status,
-                "processed_records": successful + failed,
+                "processed_records": processed,
                 "successful_records": successful,
-                "failed_records": failed,
-                "completed_at": datetime.now(UTC),
+                "failed_records": total_failed,
+                "completed_at": now,
                 "error_summary": error_summary,
             },
         )
@@ -252,9 +428,39 @@ class BulkOperationService:
             tenant_id=str(ctx.org_id),
             operation_id=str(op.id),
             successful=successful,
-            failed=failed,
+            failed=total_failed,
         )
         return BulkOperationOut.model_validate(updated)
+
+    async def _insert_entity_rows(
+        self,
+        entity_type: str,
+        rows: list[dict[str, Any]],
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        requested_by: uuid.UUID,
+        now: datetime,
+    ) -> int:
+        """INSERT validated rows into the entity table. Raises on SQL error."""
+        table = _ENTITY_TABLES[entity_type]
+        cols = _ALL_INSERT_COLUMNS[entity_type]
+        col_list = ", ".join(cols)
+        placeholders = ", ".join(f":{c}" for c in cols)
+        insert_sql = text(  # noqa: S608
+            f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})"
+        )
+
+        inserted = 0
+        for batch_start in range(0, len(rows), _BATCH_SIZE):
+            batch = rows[batch_start : batch_start + _BATCH_SIZE]
+            for row in batch:
+                params = _build_entity_values(
+                    row, entity_type, tenant_id, workspace_id, requested_by, now
+                )
+                await self._session.execute(insert_sql, params)
+                inserted += 1
+
+        return inserted
 
     # ── Bulk Archive ──────────────────────────────────────────────────────────
 

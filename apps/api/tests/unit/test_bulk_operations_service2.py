@@ -63,6 +63,11 @@ def _make_ctx():
 
 def _make_svc():
     session = AsyncMock()
+    # begin_nested() is synchronous in SQLAlchemy (returns an async context manager);
+    # configure the mock to reflect that so `async with session.begin_nested()` works.
+    nested = AsyncMock()
+    nested.__aexit__ = AsyncMock(return_value=False)  # False = propagate exceptions
+    session.begin_nested = MagicMock(return_value=nested)
     return BulkOperationService(session), session
 
 

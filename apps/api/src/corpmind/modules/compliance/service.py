@@ -15,6 +15,10 @@ Design notes
 
 from __future__ import annotations
 
+import hashlib
+import hmac as _hmac_mod
+import uuid
+
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +38,14 @@ _FREQUENCY_CAP = 2       # max marketing sends to one recipient in the rolling w
 _FREQUENCY_WINDOW = "7"  # days — kept as a string constant, not user-supplied
 
 
+def _recipient_hmac(email: str | None, tenant_id: uuid.UUID) -> str | None:
+    """HMAC-SHA256(email, tenant_id) — per-tenant PII-safe hash for unsubscribe lookups."""
+    if not email:
+        return None
+    key = str(tenant_id).encode()
+    return _hmac_mod.new(key, email.encode(), hashlib.sha256).hexdigest()
+
+
 class ComplianceService:
     """Database-backed compliance checks called by ComplianceGuardAgent nodes."""
 
@@ -43,24 +55,40 @@ class ComplianceService:
         self._unsub = UnsubscribeRepo(session)
 
     async def check_opt_in(self, req: ComplianceCheckRequest) -> ComplianceCheckResult:
-        """Verify contact has a current opt-in record (hr_contacts.is_contactable = true)."""
+        """Verify contact exists, is_contactable, and has an opted_in_at timestamp."""
         ctx = get_tenant_context()
         result = await self._session.execute(
             text(
-                "SELECT is_contactable FROM hr_contacts"
+                "SELECT is_contactable, opted_in_at, opt_in_evidence"
+                " FROM hr_contacts"
                 " WHERE id = :cid AND tenant_id = :tid"
             ),
             {"cid": str(req.contact_id), "tid": str(ctx.org_id)},
         )
         row = result.one_or_none()
-        is_contactable = bool(row and row[0])
-        log.info(
-            "compliance.opt_in_check",
-            contact_id=str(req.contact_id),
-            channel=req.channel,
-            is_contactable=is_contactable,
-        )
+
+        if row is None:
+            log.info(
+                "compliance.opt_in.failed",
+                contact_id=str(req.contact_id),
+                reason="contact_not_found",
+            )
+            event = await self._write_block_audit(req, ctx, "opt_in_contact_not_found")
+            return ComplianceCheckResult(
+                outcome=ComplianceOutcome.BLOCKED,
+                reason="Contact not found for this tenant",
+                blocked_by="opt_in",
+                audit_event_id=event.id,
+            )
+
+        is_contactable, opted_in_at, opt_in_evidence = row[0], row[1], row[2]
+
         if not is_contactable:
+            log.info(
+                "compliance.opt_in.failed",
+                contact_id=str(req.contact_id),
+                reason="not_contactable",
+            )
             event = await self._write_block_audit(req, ctx, "opt_in")
             return ComplianceCheckResult(
                 outcome=ComplianceOutcome.BLOCKED,
@@ -68,6 +96,27 @@ class ComplianceService:
                 blocked_by="opt_in",
                 audit_event_id=event.id,
             )
+
+        if opted_in_at is None:
+            log.info(
+                "compliance.opt_in.failed",
+                contact_id=str(req.contact_id),
+                reason="missing_opted_in_at",
+            )
+            event = await self._write_block_audit(req, ctx, "opt_in_missing_timestamp")
+            return ComplianceCheckResult(
+                outcome=ComplianceOutcome.BLOCKED,
+                reason="Contact is missing opt-in timestamp",
+                blocked_by="opt_in",
+                audit_event_id=event.id,
+            )
+
+        log.info(
+            "compliance.opt_in.passed",
+            contact_id=str(req.contact_id),
+            channel=req.channel,
+            has_evidence=bool(opt_in_evidence),
+        )
         return ComplianceCheckResult(outcome=ComplianceOutcome.ALLOWED)
 
     async def check_frequency_cap(self, req: ComplianceCheckRequest) -> ComplianceCheckResult:
@@ -131,6 +180,34 @@ class ComplianceService:
                 audit_event_id=event.id,
             )
         return ComplianceCheckResult(outcome=ComplianceOutcome.ALLOWED)
+
+    async def check_unsubscribe_by_contact_id(
+        self, req: ComplianceCheckRequest
+    ) -> ComplianceCheckResult:
+        """Resolve contact email → HMAC → delegate to check_unsubscribe.
+
+        Used by ComplianceGuardAgent when the caller has a contact_id but not a
+        pre-computed recipient_hash.  Keeps hash computation inside the compliance
+        module; the agent never touches raw email data.
+        """
+        ctx = get_tenant_context()
+        result = await self._session.execute(
+            text("SELECT email FROM hr_contacts WHERE id = :cid AND tenant_id = :tid"),
+            {"cid": str(req.contact_id), "tid": str(ctx.org_id)},
+        )
+        row = result.one_or_none()
+        if row is None:
+            # Contact was already rejected by opt_in check; treat as not unsubscribed.
+            log.warning(
+                "compliance.unsubscribe.contact_not_found",
+                contact_id=str(req.contact_id),
+            )
+            return ComplianceCheckResult(outcome=ComplianceOutcome.ALLOWED)
+
+        email = row[0]
+        recipient_hash = _recipient_hmac(email, ctx.org_id)
+        enriched = req.model_copy(update={"recipient_hash": recipient_hash})
+        return await self.check_unsubscribe(enriched)
 
     async def check_whatsapp_opt_in(self, req: ComplianceCheckRequest) -> ComplianceCheckResult:
         """Verify contact has WhatsApp-specific opt-in (ADR-0010, Sprint 16A).

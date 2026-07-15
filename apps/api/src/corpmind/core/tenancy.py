@@ -65,9 +65,10 @@ def clear_tenant_context(token: contextvars.Token["TenantContext | None"]) -> No
 
 
 # ── Public-path bypass ────────────────────────────────────────────────────────
+# /metrics is NOT listed here — it is intercepted explicitly in dispatch()
+# before this tuple is consulted, so it gets its own token check.
 _PUBLIC_PREFIXES = (
     "/healthz",
-    "/metrics",
     "/docs",
     "/redoc",
     "/openapi.json",
@@ -95,7 +96,12 @@ class TenantMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        # Skip auth for public paths
+        # /metrics is exempt from JWT auth but requires its own bearer token so
+        # Prometheus can scrape without a per-tenant JWT.
+        if request.url.path == "/metrics":
+            return await _metrics_auth(request, call_next)
+
+        # Skip JWT auth for other public paths
         if any(request.url.path.startswith(p) for p in _PUBLIC_PREFIXES):
             return await call_next(request)
 
@@ -123,6 +129,33 @@ class TenantMiddleware(BaseHTTPMiddleware):
             structlog.contextvars.clear_contextvars()
 
         return response
+
+
+async def _metrics_auth(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    """Gate /metrics behind a static bearer token used by Prometheus.
+
+    If METRICS_TOKEN is empty (dev/staging without token configured) the
+    endpoint is open — matching the permissive default for non-production.
+    In production the config validator enforces that METRICS_TOKEN is non-empty.
+    """
+    from corpmind.core.config import settings
+    from fastapi.responses import JSONResponse
+
+    if settings.METRICS_TOKEN:
+        auth_header = request.headers.get("Authorization", "")
+        expected = f"Bearer {settings.METRICS_TOKEN}"
+        if auth_header != expected:
+            log.warning("metrics.unauthorized", path=request.url.path)
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "code": "unauthenticated",
+                    "message": "Valid Bearer token required to scrape /metrics",
+                    "request_id": "",
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
 
 
 async def _extract_context(request: Request) -> TenantContext:

@@ -7,7 +7,9 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from corpmind.core.config import settings
 from corpmind.core.database import get_session
+from corpmind.core.rate_limit import make_rate_limiter
 from corpmind.modules.integrations.schemas import (
     ApiKeyCreate,
     ApiKeyCreatedOut,
@@ -22,6 +24,17 @@ from corpmind.modules.integrations.schemas import (
 from corpmind.modules.integrations.service import IntegrationService
 
 router = APIRouter()
+
+_api_key_rl = make_rate_limiter(
+    "api_key_create",
+    max_requests=settings.RATE_LIMIT_API_KEY_MAX,
+    window_seconds=settings.RATE_LIMIT_API_KEY_WINDOW,
+)
+_webhook_rl = make_rate_limiter(
+    "webhook_create",
+    max_requests=settings.RATE_LIMIT_WEBHOOK_MAX,
+    window_seconds=settings.RATE_LIMIT_WEBHOOK_WINDOW,
+)
 
 
 def _svc(session: AsyncSession = Depends(get_session)) -> IntegrationService:
@@ -51,6 +64,7 @@ async def list_api_keys(
 )
 async def create_api_key(
     body: ApiKeyCreate,
+    _rl: None = Depends(_api_key_rl),
     svc: IntegrationService = Depends(_svc),
 ) -> ApiKeyCreatedOut:
     return await svc.create_api_key(body)
@@ -103,6 +117,7 @@ async def list_webhooks(
 )
 async def create_webhook(
     body: WebhookCreate,
+    _rl: None = Depends(_webhook_rl),
     svc: IntegrationService = Depends(_svc),
 ) -> WebhookCreatedOut:
     return await svc.create_webhook(body)

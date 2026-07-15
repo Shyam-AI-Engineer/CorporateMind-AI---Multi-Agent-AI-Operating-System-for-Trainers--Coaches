@@ -97,11 +97,20 @@ jobs:
       - name: Install dependencies (including dev)
         run: uv sync
 
-      - name: Run Alembic migrations
+      - name: Run Alembic migrations (upgrade)
         run: uv run alembic upgrade head
 
-      - name: Run tests
-        run: uv run pytest -q --tb=short
+      - name: Verify migration downgrade (round-trip)
+        # Confirms every migration is reversible — catches missing downgrade()
+        # implementations and schema constraints that prevent reversal.
+        run: |
+          uv run alembic downgrade -1
+          uv run alembic upgrade head
+
+      - name: Run tests with coverage gate
+        # --cov-fail-under=70 is also in pyproject.toml addopts, but we make
+        # it explicit here so CI output names it as a distinct failure reason.
+        run: uv run pytest -q --tb=short --cov-fail-under=70
 
   # ── Secret scanning ─────────────────────────────────────────────────────────
   secret-scan:
@@ -237,12 +246,13 @@ jobs:
           EURI_API_BASE_URL: ${{ secrets.EURI_API_BASE_URL }}
         run: promptfoo eval -c evals.yaml --no-progress-bar
 
-  # ── Docker build ─────────────────────────────────────────────────────────────
+  # ── Docker build + health check verification ─────────────────────────────────
   docker-build:
     name: Docker build (API)
     runs-on: ubuntu-latest
     needs: [api-test, web-test, secret-scan]
-    if: github.ref == 'refs/heads/main'
+    # Build on every PR and every push to main (not just main) so broken
+    # Dockerfiles are caught before merge, not after.
 
     steps:
       - uses: actions/checkout@v4
@@ -256,6 +266,14 @@ jobs:
           context: .
           file: infra/docker/Dockerfile
           push: false
+          load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: corpmind-api:${{ github.sha }}
+
+      - name: Verify Docker HEALTHCHECK instruction present
+        # Confirms HEALTHCHECK was not accidentally removed from the Dockerfile.
+        run: |
+          docker inspect --format='{{json .Config.Healthcheck}}' \
+            corpmind-api:${{ github.sha }} | grep -v 'null' \
+            || (echo "ERROR: Docker HEALTHCHECK is missing" && exit 1)

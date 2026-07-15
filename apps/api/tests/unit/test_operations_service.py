@@ -8,6 +8,7 @@ from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from freezegun import freeze_time
 
 from corpmind.modules.operations.schemas import (
     BusinessTaskIn,
@@ -255,6 +256,7 @@ class TestComputeWorkload:
         result = svc._compute_workload([], 5)
         assert result.completed_today == 5
 
+    @freeze_time("2026-06-27")
     def test_overdue_counts_open_tasks_with_past_due_date(self) -> None:
         svc, _ = _svc()
         tasks = [
